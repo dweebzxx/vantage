@@ -1,0 +1,7 @@
+build-report-logs/
+.godot/
+.mono/
+.import/
+.DS_Store
+bin/
+obj/
