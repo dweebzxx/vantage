@@ -1,0 +1,25 @@
+[gd_scene load_steps=3 format=3 uid="uid://b702jgo8j66mm"]
+
+[ext_resource type="Script" path="res://entities/player/PlayerController.cs" id="1_8svrp"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_b21wc"]
+size = Vector2(32, 32)
+
+[node name="Player" type="CharacterBody2D"]
+script = ExtResource("1_8svrp")
+
+[node name="DevPlaceholderBody" type="Polygon2D" parent="."]
+color = Color(0.15, 0.65, 0.95, 1)
+polygon = PackedVector2Array(-16, -16, 16, -16, 16, 16, -16, 16)
+
+[node name="DevPlaceholderDirection" type="Polygon2D" parent="."]
+color = Color(1, 1, 1, 1)
+polygon = PackedVector2Array(0, -18, 7, -5, -7, -5)
+
+[node name="DevPlaceholderCollision" type="CollisionShape2D" parent="."]
+shape = SubResource("RectangleShape2D_b21wc")
+
+[node name="Camera2D" type="Camera2D" parent="."]
+enabled = true
+position_smoothing_enabled = true
+position_smoothing_speed = 8.0

@@ -1,0 +1,17 @@
+; Engine configuration file.
+; Edit through the Godot editor when possible.
+;
+; Format:
+;   [section]
+;   param=value
+
+config_version=5
+
+[application]
+
+config/name="Vantage Headless Server"
+config/features=PackedStringArray("4.7", "C#", "Forward Plus")
+
+[physics]
+
+common/physics_ticks_per_second=60

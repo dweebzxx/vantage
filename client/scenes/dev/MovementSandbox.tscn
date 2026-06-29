@@ -1,0 +1,10 @@
+[gd_scene load_steps=3 format=3 uid="uid://cr7xa36sqwrxu"]
+
+[ext_resource type="PackedScene" path="res://scenes/dev/DevTilemapArena.tscn" id="1_dh6vw"]
+[ext_resource type="PackedScene" path="res://entities/player/Player.tscn" id="2_5tqfn"]
+
+[node name="MovementSandbox" type="Node2D"]
+
+[node name="DevTilemapArena" parent="." instance=ExtResource("1_dh6vw")]
+
+[node name="Player" parent="." instance=ExtResource("2_5tqfn")]
