@@ -5,3 +5,15 @@ build-report-logs/
 .DS_Store
 bin/
 obj/
+server/nakama/data/
+build/
+builds/
+exports/
+dist/
+*.pck
+*.user
+*.userprefs
+.vs/
+.vscode/
+.idea/
+properties.godot.cfg
