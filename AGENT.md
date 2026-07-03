@@ -138,6 +138,49 @@ Metadata must validate against `metadata-schema.json` when present. Required tru
 - Confirm no protected paths or unrelated files were staged before committing.
 - Do not push unless explicitly asked.
 
+### Metadata Validation: Python Interpreter Resolution
+
+Resolve a Python interpreter from explicit absolute paths before running metadata JSON syntax checks or schema validation. PATH-dependent `python3` is unreliable on this machine due to cross-account shell PATH non-determinism: `/etc/zshenv` may inject a system-wide dweebz-scoped PATH that login shells inconsistently override, causing `python3` to resolve to a different interpreter than expected. P07, P08, and P09 all recorded `ModuleNotFoundError: No module named 'jsonschema'` when using the bare PATH-resolved interpreter.
+
+**Machine-specific workaround — not a gameplay or runtime dependency.** If this repo is cloned to another machine these hardcoded paths may not exist and must be updated by a future AGENT.md maintenance pass.
+
+Resolve in this order, using the first executable found:
+
+1. `/Users/josh/.pyenv/versions/3.12.8/bin/python3`
+2. `/Users/dweebz/.pyenv/versions/3.12.8/bin/python3` (verified present and has jsonschema as of P09.1)
+3. `python3` — allowed as last resort for JSON syntax validation only; schema validation still requires `jsonschema` importability at the resolved path.
+
+Before attempting schema validation, verify `jsonschema` is importable at the resolved interpreter:
+
+```zsh
+"$PY" -c "import jsonschema" 2>/dev/null || echo "jsonschema not importable at $PY — schema validation skipped"
+```
+
+Full resolver and validation block for use in pass verification:
+
+```zsh
+PY=""
+for _p in /Users/josh/.pyenv/versions/3.12.8/bin/python3 \
+           /Users/dweebz/.pyenv/versions/3.12.8/bin/python3; do
+  [[ -x "$_p" ]] && PY="$_p" && break
+done
+[[ -z "$PY" ]] && PY=python3  # JSON syntax only; schema validation may fail
+
+"$PY" -m json.tool "$AI_METADATA_PATH" > /dev/null && echo "json-syntax-ok: $PY"
+
+if "$PY" -c "import jsonschema" 2>/dev/null; then
+  "$PY" -c "
+import json, jsonschema, pathlib
+schema = json.loads(pathlib.Path('metadata-schema.json').read_text())
+data   = json.loads(pathlib.Path('$AI_METADATA_PATH').read_text())
+jsonschema.validate(data, schema)
+print('schema-valid')
+"
+else
+  echo "jsonschema not importable at $PY — schema validation skipped"
+fi
+```
+
 ## P01 Scope Lock
 
 P01 is workflow-only adoption bootstrap. It may create workflow docs, reports, scripts, placeholders, `.gitignore` entries, and `global.json`. It must not create gameplay code, Godot projects, C# projects, solution files, CI, Nakama modules, or assets.
