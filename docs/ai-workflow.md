@@ -1,3 +1,12 @@
+---
+title: "vantage ai workflow"
+version: "1.0"
+status: 
+last_verified: "2026-07-01"
+game_architect: "dweebz"
+author: "Josh"
+---
+
 # AI Workflow
 
 ## Workflow Guide Version v6.2

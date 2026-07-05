@@ -1,3 +1,12 @@
+---
+title: "vantage core document"
+version: "1.0"
+status: 
+last_verified: "2026-06-29"
+game_architect: "dweebz"
+author: "Josh"
+---
+
 # vantage Core Document
 
 ## 0. External verification (current as of June 2026)
@@ -758,31 +767,48 @@ This is the milestone that determines whether the project lives or dies.
 
 ---
 
-## 9. First 10 implementation passes
+## 9. Implementation pass history and remaining sequence
 
-These come after the planning conversation we are in now. P01 is the adoption bootstrap.
+### 9.1 Passes completed (P01–P07)
 
-| # | Name | Purpose | Likely files | Agent does | You verify | Agent |
-|---|---|---|---|---|---|---|
-| P01 | Adoption bootstrap | Stand up AI workflow files | `AGENT.md`, `metadata-schema.json`, `scripts/ai-post-pass.zsh`, `scripts/ai-tool-preflight.zsh`, `.gitignore` update, `global.json`, `docs/{architecture,networking,ai-workflow}.md` skeletons | Per workflow guide §24 bootstrap; do not touch gameplay | All scripts run, `.gitignore` updated, `global.json` pins .NET 10 SDK, no Godot project changes | Claude Code |
-| P02 | Project skeleton | Solution + three csproj + first unit test | `vantage.sln`, `client/Vantage.Client.csproj`, `client/project.godot` (empty), `server/headless/Vantage.Server.csproj`, `server/headless/project.godot` (empty), `shared/Vantage.Shared/Vantage.Shared.csproj`, `tests/Vantage.Shared.Tests/*` | Create empty buildable solution, one trivial test | `dotnet build` clean, `dotnet test` passes, Godot opens client without errors | Claude Code |
-| P03 | Input + player movement (single-player) | Local control of a placeholder player | `client/autoloads/InputBus.cs`, `client/entities/PlayerView.tscn` + script, `client/scenes/Boot.tscn`, `client/scenes/arenas/Arena01.tscn` | Add `InputBus` autoload, build PlayerView with `_PhysicsProcess` movement at 60 Hz, test arena scene | Manual: WASD moves player, mouse aims, 60 FPS solid | Claude Code |
-| P04 | Test tilemap with collisions | Validate `TileMapLayer` and physics | `client/assets/tiles/test_tileset.png`, `client/scenes/arenas/Arena01.tscn` update, `client/resources/test_tileset.tres` | Build a small `TileMapLayer` with two tile types (walkable, wall), apply collision | Manual: player collides with walls, walks on floor | Codex |
-| P05 | Camera follow + aim line | Visual polish for prototype | `client/entities/PlayerView.tscn`, `client/scenes/arenas/Arena01.tscn`, possibly `client/autoloads/CameraRig.cs` | Smoothed camera following player, debug aim line from player to mouse | Manual: camera does not jitter, aim line correct under cursor | Codex |
-| P06 | WeaponDef + DamageMath in Shared | Move weapon stats into Shared library | `shared/Vantage.Shared/Game/WeaponDef.cs`, `shared/Vantage.Shared/Game/DamageMath.cs`, `tests/Vantage.Shared.Tests/DamageMathTests.cs`, `tests/Vantage.Shared.Tests/WeaponDefTests.cs` | Define `WeaponId`, `WeaponDef` (range, dmg, fire rate, magazine), pure `DamageMath` functions, unit tests | `dotnet test` passes, no Godot deps in Shared | Claude Code |
-| P07 | Single-player hitscan + projectile firing | Wire weapons in client-only world | `client/entities/PlayerView.tscn`, `client/match/LocalWorld.cs` (a temporary single-player world), `client/entities/BulletView.tscn` | Implement firing using `WeaponDef` from Shared, hitscan via `PhysicsRayQueryParameters2D`, projectile gun via `RigidBody2D` or kinematic | Manual: each weapon fires at correct rate, hitscan kills dummy, projectile travels and impacts | Claude Code |
-| P08 | Grenade in single-player | Grenades + explosion | `client/entities/GrenadeView.tscn`, `client/match/LocalWorld.cs` update, `shared/Vantage.Shared/Game/GrenadeDef.cs` | Grenade arc (parabolic or physics), 2 s fuse, radius damage using `DamageMath` | Manual: grenade arcs realistically, explodes on time, damages within radius | Codex |
-| P09 | HUD: health, ammo, weapon icon | Player feedback | `client/ui/Hud.tscn`, `client/ui/Hud.cs` | Wire HUD to current player state from `LocalWorld` (still single-player), placeholder graphics | Manual: HUD updates as you fire/take damage | Codex |
-| P10 | Damage and weapon-system tests | Lock in damage math correctness | `tests/Vantage.Shared.Tests/DamageMathTests.cs` (expand), `tests/Vantage.Shared.Tests/WeaponDefTests.cs` (expand), CI workflow file `.github/workflows/build.yml` | Add coverage for edge cases (zero distance, max range, headshot multiplier if any, friendly fire boolean), add basic GH Actions YAML running `dotnet test` | `dotnet test` passes, CI runs green on push | Antigravity |
+| # | Name | Result | Notes |
+|---|---|---|---|
+| P01 | Adoption bootstrap | WORKFLOW_ONLY | AI workflow scaffolding, `.gitignore` hardening, `global.json`, docs skeletons. No gameplay. |
+| P02 | Project skeleton | BUILD_SUCCEEDED | `vantage.sln`, client/server/shared/test csproj created. `Vantage.Shared` confirmed Godot-free. |
+| P03 | Single-player movement | BUILD_SUCCEEDED | WASD movement, camera, dev placeholder visuals. |
+| P04 | Tilemap test arena | BUILD_SUCCEEDED | `TileMapLayer` with wall/floor/obstacle collision. |
+| P05 | Top-down aim | BUILD_SUCCEEDED | Mouse aim direction and debug aim visualization. |
+| P06 | Local combat foundation | BUILD_SUCCEEDED | Local hitscan ray, debug shot line, `DevTargetDummy` hit feedback. Built directly in client scene scripts, not in `Vantage.Shared`. |
+| P07 | Local damage dummy | BUILD_SUCCEEDED | Bounded dummy health/damage counter, inert state at 0 HP. Still client-only; no Shared weapon/damage contracts exist yet. |
 
-Why these ten:
-- P01 to P02 are workflow plumbing. No gameplay risk.
-- P03 to P05 prove the Godot project works and you can move a thing around.
-- P06 introduces the Shared library before any networking. This is the single most important early decision: weapon stats live in Shared from day one.
-- P07 to P09 give you single-player combat against a dummy, with stats from Shared. This is the M3 boundary.
-- P10 cements correctness before networking. The temptation will be to skip it. Don't.
+**Drift note:** The original plan for this section called for weapon stats and damage math to enter `Vantage.Shared` at P06 (see §11 and the original P06 row this section previously listed). What was actually executed at P06–P07 is a disposable client-only combat prototype. `Vantage.Shared` still contains only a non-gameplay sentinel as of P07. The remaining sequence below corrects this before M3 is considered complete.
 
-After P10, the next high-stakes pass is **P11: protocol DTOs in Shared** (`InputCommand`, `StateSnapshot`, `Events`, MemoryPack annotations). This is the gateway to M4. Treat it like P06: Claude Code only, careful design, exhaustive tests.
+### 9.2 Remaining sequence (P08 onward)
+
+Two restructuring decisions govern this sequence (see `decision_log_and_open_questions.md`, Approved Decisions):
+
+- Player health/death/respawn is deferred out of local M3 and into server-authoritative M4 (P20). M3 keeps the player invulnerable; only dev dummies take damage.
+- CI is deferred to the end of the M4 block (P22), after the client/server authoritative loop is proven, not at the end of M3.
+
+| # | Name | Purpose | Layer | Agent |
+|---|---|---|---|---|
+| P08 | M2/M3 transition cleanup + verification gate | Dummy reset, second dummy, close M2 manual checklist | Client | Codex |
+| P09 | Shared combat contracts + tests | `WeaponId`, `WeaponDef`, `GrenadeDef`, `DamageMath` in `Vantage.Shared`, with placeholder stats | Shared | Claude Code |
+| P10 | Client hitscan refactor onto Shared | Replace P06/P07 magic numbers with `WeaponDef`/`DamageMath` consumption | Client + Shared | Claude Code |
+| P11 | Projectile weapon + weapon switching (local) | Second weapon kind, weapon switch input | Client | Codex |
+| P12 | Grenade + radius damage (local) | Thrown grenade, fuse, radius falloff via `GrenadeDef` | Client | Codex |
+| P13 | Local combat HUD (view-only) | Weapon indicator, reticle, static placeholder health bar | Client | Codex |
+| P14 | Shared combat test expansion + M3 verification gate | Expanded `DamageMath`/`WeaponDef` tests; M3 manual checklist closure | Shared + manual | Antigravity |
+| P15 | Shared protocol DTOs + serialization + tick math | `InputCommand`, `StateSnapshot`, `Events`, MemoryPack, `TickMath` | Shared | Claude Code |
+| P16 | Headless sim shell | `ServerMain`, `TickLoop`, `World`, ring buffer, 60 Hz | Server | Claude Code |
+| P17 | ENet transport + client connect + input send loop | `ServerPeer`, `GameClient`, hardcoded IP, no auth | Client + Server | Claude Code |
+| P18 | Server-authoritative MovementSystem | Authoritative movement from `InputCommand` | Server | Claude Code |
+| P19 | Snapshot broadcast + client render binding | `StateSnapshot` at 30 Hz, view-only client render | Client + Server | Claude Code |
+| P20 | Server-authoritative WeaponSystem + player health/damage/death | Authoritative combat and player life-state, moved from M3 per restructure | Server | Claude Code |
+| P21 | Server integration test harness | In-process boot, fake clients, deterministic assertions | Server + tests | Claude Code / Antigravity |
+| P22 | Minimal CI: build + test on push | `.github/workflows/build.yml`, `dotnet build`/`test` on push | CI | Claude Code |
+
+M2 is complete once P08's manual gate passes. M3 is complete once P14's manual gate passes: all three weapon kinds driven by `Vantage.Shared`, no weapon/damage magic numbers in client scene scripts, no player life-state, no networking. M4 is complete once P22 is green: 1v1 loopback with authoritative movement, combat, and player health/death; MemoryPack protocol in Shared; ring buffer present; integration harness green; minimal CI green. Nakama, interpolation, and prediction remain out of scope for M4 and belong to M6/M7/M11.
 
 ---
 

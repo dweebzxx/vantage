@@ -1,0 +1,29 @@
+[gd_scene load_steps=3 format=3 uid="uid://dk04yjab8e18a"]
+
+[ext_resource type="Script" path="res://entities/dev/DevTargetDummy.cs" id="1_7ujml"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_6jvii"]
+size = Vector2(34, 46)
+
+[node name="DevTargetDummy" type="Area2D"]
+script = ExtResource("1_7ujml")
+
+[node name="DevPlaceholderBody" type="Polygon2D" parent="."]
+color = Color(0.9, 0.25, 0.2, 1)
+polygon = PackedVector2Array(-17, -23, 17, -23, 17, 23, -17, 23)
+
+[node name="DevPlaceholderCenterLine" type="Line2D" parent="."]
+points = PackedVector2Array(-17, 0, 17, 0)
+width = 2.0
+default_color = Color(1, 1, 1, 1)
+
+[node name="DevPlaceholderCollision" type="CollisionShape2D" parent="."]
+shape = SubResource("RectangleShape2D_6jvii")
+
+[node name="DevDebugHitCountLabel" type="Label" parent="."]
+offset_left = -56.0
+offset_top = -44.0
+offset_right = 56.0
+offset_bottom = -21.0
+text = "HP 3/3 Dmg 0/3"
+horizontal_alignment = 1

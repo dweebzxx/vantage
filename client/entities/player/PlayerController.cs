@@ -10,6 +10,26 @@ public partial class PlayerController : CharacterBody2D
     [Export]
     public float MoveSpeed { get; set; } = 240.0f;
 
+    [Export]
+    public NodePath DevDebugAimPivotPath { get; set; } = new("DevDebugAimPivot");
+
+    public Vector2 AimDirection { get; private set; } = Vector2.Right;
+
+    public float AimAngleRadians { get; private set; }
+
+    private Node2D? _devDebugAimPivot;
+
+    public override void _Ready()
+    {
+        _devDebugAimPivot = GetNodeOrNull<Node2D>(DevDebugAimPivotPath);
+        UpdateLocalMouseAim();
+    }
+
+    public override void _Process(double delta)
+    {
+        UpdateLocalMouseAim();
+    }
+
     public override void _PhysicsProcess(double delta)
     {
         Vector2 inputDirection = Input.GetVector("move_left", "move_right", "move_up", "move_down");
@@ -21,5 +41,23 @@ public partial class PlayerController : CharacterBody2D
 
         Velocity = inputDirection * MoveSpeed;
         MoveAndSlide();
+    }
+
+    private void UpdateLocalMouseAim()
+    {
+        Vector2 playerToMouse = GetGlobalMousePosition() - GlobalPosition;
+
+        if (playerToMouse.LengthSquared() <= Mathf.Epsilon)
+        {
+            return;
+        }
+
+        AimDirection = playerToMouse.Normalized();
+        AimAngleRadians = AimDirection.Angle();
+
+        if (_devDebugAimPivot is not null)
+        {
+            _devDebugAimPivot.Rotation = AimAngleRadians;
+        }
     }
 }

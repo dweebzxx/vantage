@@ -1,3 +1,12 @@
+---
+title: "vantage architecture"
+version: "1.0"
+status: 
+last_verified: "2026-07-01"
+game_architect: "dweebz"
+author: "Josh"
+---
+
 # Architecture
 
 ## Overview

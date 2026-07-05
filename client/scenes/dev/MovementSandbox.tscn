@@ -1,10 +1,17 @@
-[gd_scene load_steps=3 format=3 uid="uid://cr7xa36sqwrxu"]
+[gd_scene load_steps=4 format=3 uid="uid://cr7xa36sqwrxu"]
 
 [ext_resource type="PackedScene" path="res://scenes/dev/DevTilemapArena.tscn" id="1_dh6vw"]
 [ext_resource type="PackedScene" path="res://entities/player/Player.tscn" id="2_5tqfn"]
+[ext_resource type="PackedScene" path="res://entities/dev/DevTargetDummy.tscn" id="3_wx5fo"]
 
 [node name="MovementSandbox" type="Node2D"]
 
 [node name="DevTilemapArena" parent="." instance=ExtResource("1_dh6vw")]
 
 [node name="Player" parent="." instance=ExtResource("2_5tqfn")]
+
+[node name="DevTargetDummy" parent="." instance=ExtResource("3_wx5fo")]
+position = Vector2(160, 0)
+
+[node name="DevTargetDummy2" parent="." instance=ExtResource("3_wx5fo")]
+position = Vector2(-160, 96)

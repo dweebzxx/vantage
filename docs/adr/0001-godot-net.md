@@ -1,3 +1,12 @@
+---
+title: "vantage adr 0001 godot net"
+version: "1.0"
+status: 
+last_verified: "2026-07-01"
+game_architect: "dweebz"
+author: "Josh"
+---
+
 # ADR 0001: Use Godot .NET Client With Godot .NET Headless Authoritative Server
 
 ## Status
