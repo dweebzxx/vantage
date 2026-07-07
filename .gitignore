@@ -17,3 +17,46 @@ dist/
 .vscode/
 .idea/
 properties.godot.cfg
+
+# Workflow-internal (Tier 2 — lives in .private/, symlinked in)
+/AGENTS.md
+/CLAUDE.md
+/metadata-schema.json
+/scripts/
+/.codex/
+/.claude/
+/audit/
+/.private/
+
+# NOTE: a trailing-slash gitignore pattern (e.g. /scripts/) only matches a real
+# directory, not a symlink — even a symlink pointing at a directory. Since
+# scripts/, .codex/, .claude/, and audit/ at the project root are symlinks
+# into .private/, repeat them here without the trailing slash so they are
+# actually excluded.
+/scripts
+/.codex
+/.claude
+/audit
+
+# Tool-managed local state (not versioned)
+/.antigravitycli/
+
+# Build-report split (reports/metadata-reports symlinked to .private/; rest local-only)
+build-report-logs/launchers/
+build-report-logs/logs/
+build-report-logs/prompts/
+build-report-logs/reports/
+build-report-logs/metadata-reports/
+
+# Project-specific Tier 2 — lives in .private/, symlinked in
+/docs/
+/vantage_core_doc.md
+/decision_log_and_open_questions.md
+
+# /docs is a symlink into .private/ — see trailing-slash note above
+/docs
+
+# Tier 1 — secrets (project-specific; add as needed)
+.env
+.env.*
+!.env.example
