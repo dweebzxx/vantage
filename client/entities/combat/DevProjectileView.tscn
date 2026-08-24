@@ -1,0 +1,20 @@
+[gd_scene load_steps=3 format=3 uid="uid://c8n2fq0v6h6yx"]
+
+[ext_resource type="Script" path="res://entities/combat/DevProjectileView.cs" id="1_g5wqk"]
+
+[sub_resource type="CircleShape2D" id="CircleShape2D_pjq4k"]
+radius = 6.0
+
+[node name="DevProjectileView" type="Area2D"]
+collision_layer = 0
+collision_mask = 1
+monitoring = true
+monitorable = false
+script = ExtResource("1_g5wqk")
+
+[node name="DevPlaceholderBody" type="Polygon2D" parent="."]
+color = Color(1, 0.55, 0.15, 1)
+polygon = PackedVector2Array(0, -6, 6, 0, 0, 6, -6, 0)
+
+[node name="DevPlaceholderCollision" type="CollisionShape2D" parent="."]
+shape = SubResource("CircleShape2D_pjq4k")

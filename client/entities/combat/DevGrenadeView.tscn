@@ -1,0 +1,18 @@
+[gd_scene load_steps=2 format=3 uid="uid://b6f3n8k2m5w7q"]
+
+[ext_resource type="Script" path="res://entities/combat/DevGrenadeView.cs" id="1_k7h2p"]
+
+[node name="DevGrenadeView" type="Node2D"]
+script = ExtResource("1_k7h2p")
+
+[node name="DevPlaceholderBody" type="Polygon2D" parent="."]
+color = Color(0.15, 0.85, 0.35, 1)
+polygon = PackedVector2Array(0, -8, 8, 0, 0, 8, -8, 0)
+
+[node name="DevFuseCountdownLabel" type="Label" parent="."]
+offset_left = -20.0
+offset_top = -30.0
+offset_right = 20.0
+offset_bottom = -10.0
+horizontal_alignment = 1
+text = "1.5"

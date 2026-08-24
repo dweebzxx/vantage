@@ -92,6 +92,51 @@ public sealed class CombatMathTests
     }
 
     [Fact]
+    public void Radius_damage_applies_linear_falloff_at_midpoint()
+    {
+        int damage = DamageMath.RadiusDamage(damage: 100, distanceUnits: 5.0f, radiusUnits: 10.0f, falloff: 1.0f);
+
+        Assert.Equal(50, damage);
+    }
+
+    [Fact]
+    public void Radius_damage_with_zero_falloff_stays_full_within_radius()
+    {
+        int damage = DamageMath.RadiusDamage(damage: 100, distanceUnits: 9.0f, radiusUnits: 10.0f, falloff: 0.0f);
+
+        Assert.Equal(100, damage);
+    }
+
+    [Fact]
+    public void Radius_damage_with_zero_falloff_still_stops_outside_radius()
+    {
+        int damage = DamageMath.RadiusDamage(damage: 100, distanceUnits: 10.01f, radiusUnits: 10.0f, falloff: 0.0f);
+
+        Assert.Equal(0, damage);
+    }
+
+    [Fact]
+    public void Radius_damage_with_partial_falloff_reduces_less_steeply()
+    {
+        int damage = DamageMath.RadiusDamage(damage: 100, distanceUnits: 10.0f, radiusUnits: 10.0f, falloff: 0.5f);
+
+        Assert.Equal(50, damage);
+    }
+
+    [Fact]
+    public void Radius_damage_from_grenade_def_applies_falloff_at_non_zero_distance()
+    {
+        GrenadeDef grenade = GrenadeDef.DevPlaceholder;
+
+        int centerDamage = DamageMath.RadiusDamage(grenade, 0.0f);
+        int edgeDamage = DamageMath.RadiusDamage(grenade, grenade.RadiusUnits);
+        int midDamage = DamageMath.RadiusDamage(grenade, grenade.RadiusUnits / 2.0f);
+
+        Assert.True(midDamage < centerDamage);
+        Assert.True(midDamage >= edgeDamage);
+    }
+
+    [Fact]
     public void Apply_damage_to_health_never_underflows_below_zero()
     {
         int health = DamageMath.ApplyDamageToHealth(currentHealth: 20, damage: 25);

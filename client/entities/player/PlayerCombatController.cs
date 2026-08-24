@@ -8,29 +8,47 @@ using Vantage.Shared.Game;
 [GlobalClass]
 public partial class PlayerCombatController : Node
 {
-    private static readonly WeaponDef DevHitscanWeapon = WeaponDef.DevHitscan;
-
     [Export]
     public float DevDebugShotVisibleSeconds { get; set; } = 0.08f;
 
     [Export]
     public NodePath DevDebugShotLinePath { get; set; } = new("DevDebugShotLine");
 
+    [Export]
+    public NodePath DevDebugActiveWeaponLabelPath { get; set; } = new("DevDebugActiveWeaponLabel");
+
+    [Export]
+    public PackedScene? DevProjectileScene { get; set; }
+
+    [Export]
+    public float DevMuzzleOffsetUnits { get; set; } = 28.0f;
+
+    [Export]
+    public PackedScene? DevGrenadeScene { get; set; }
+
+    private readonly GrenadeDef _devGrenade = GrenadeDef.DevPlaceholder;
+
     private PlayerController? _player;
     private Line2D? _devDebugShotLine;
+    private Label? _devDebugActiveWeaponLabel;
+    private WeaponDef _activeWeapon = WeaponDef.DevHitscan;
     private double _cooldownRemaining;
     private double _shotVisibleRemaining;
+    private double _grenadeCooldownRemaining;
 
     public override void _Ready()
     {
         _player = GetParentOrNull<PlayerController>();
         _devDebugShotLine = GetNodeOrNull<Line2D>(DevDebugShotLinePath);
+        _devDebugActiveWeaponLabel = GetNodeOrNull<Label>(DevDebugActiveWeaponLabelPath);
 
         if (_devDebugShotLine is not null)
         {
             _devDebugShotLine.TopLevel = true;
             _devDebugShotLine.Visible = false;
         }
+
+        UpdateDevDebugActiveWeaponLabel();
     }
 
     public override void _Process(double delta)
@@ -50,10 +68,64 @@ public partial class PlayerCombatController : Node
             }
         }
 
+        if (_grenadeCooldownRemaining > 0.0)
+        {
+            _grenadeCooldownRemaining = Mathf.Max(0.0, _grenadeCooldownRemaining - delta);
+        }
+
+        if (Input.IsActionJustPressed("weapon_slot_1"))
+        {
+            SwitchActiveWeapon(WeaponDef.DevHitscan);
+        }
+        else if (Input.IsActionJustPressed("weapon_slot_2"))
+        {
+            SwitchActiveWeapon(WeaponDef.DevProjectile);
+        }
+
         if (Input.IsActionJustPressed("primary_fire") && _cooldownRemaining <= 0.0)
         {
-            FireLocalDebugShot();
+            FirePrimary();
         }
+
+        if (Input.IsActionJustPressed("grenade_throw") && _grenadeCooldownRemaining <= 0.0)
+        {
+            FireLocalDebugGrenade();
+        }
+    }
+
+    private void SwitchActiveWeapon(WeaponDef weapon)
+    {
+        if (_activeWeapon.Id == weapon.Id)
+        {
+            return;
+        }
+
+        _activeWeapon = weapon;
+        UpdateDevDebugActiveWeaponLabel();
+        GD.Print($"[DevCombat] Active weapon switched to {_activeWeapon.Id}");
+    }
+
+    private void UpdateDevDebugActiveWeaponLabel()
+    {
+        if (_devDebugActiveWeaponLabel is not null)
+        {
+            _devDebugActiveWeaponLabel.Text = $"Weapon: {_activeWeapon.Id}";
+        }
+    }
+
+    private void FirePrimary()
+    {
+        switch (_activeWeapon.Kind)
+        {
+            case WeaponKind.Hitscan:
+                FireLocalDebugShot();
+                break;
+            case WeaponKind.Projectile:
+                FireLocalDebugProjectile();
+                break;
+        }
+
+        _cooldownRemaining = _activeWeapon.FireIntervalSeconds;
     }
 
     private void FireLocalDebugShot()
@@ -64,7 +136,7 @@ public partial class PlayerCombatController : Node
         }
 
         Vector2 from = _player.GlobalPosition;
-        Vector2 to = from + (_player.AimDirection * DevHitscanWeapon.RangeUnits);
+        Vector2 to = from + (_player.AimDirection * _activeWeapon.RangeUnits);
 
         PhysicsRayQueryParameters2D query = PhysicsRayQueryParameters2D.Create(from, to);
         query.Exclude = new Godot.Collections.Array<Rid> { _player.GetRid() };
@@ -81,12 +153,51 @@ public partial class PlayerCombatController : Node
 
         if (result.TryGetValue("collider", out Variant colliderVariant) && colliderVariant.AsGodotObject() is Node colliderNode)
         {
-            int damage = DamageMath.HitscanDamage(DevHitscanWeapon, from.DistanceTo(shotEnd));
+            int damage = DamageMath.HitscanDamage(_activeWeapon, from.DistanceTo(shotEnd));
             ApplyDevTargetDebugDamage(colliderNode, damage);
         }
 
         ShowDebugShot(from, shotEnd);
-        _cooldownRemaining = DevHitscanWeapon.FireIntervalSeconds;
+    }
+
+    private void FireLocalDebugProjectile()
+    {
+        if (_player is null || DevProjectileScene is null)
+        {
+            return;
+        }
+
+        if (DevProjectileScene.Instantiate() is not DevProjectileView projectile)
+        {
+            return;
+        }
+
+        Vector2 origin = _player.GlobalPosition + (_player.AimDirection * DevMuzzleOffsetUnits);
+
+        Node spawnParent = _player.GetParentOrNull<Node>() ?? _player;
+        spawnParent.AddChild(projectile);
+        projectile.Configure(_activeWeapon, origin, _player.AimDirection, _player);
+    }
+
+    private void FireLocalDebugGrenade()
+    {
+        if (_player is null || DevGrenadeScene is null)
+        {
+            return;
+        }
+
+        if (DevGrenadeScene.Instantiate() is not DevGrenadeView grenade)
+        {
+            return;
+        }
+
+        Vector2 origin = _player.GlobalPosition + (_player.AimDirection * DevMuzzleOffsetUnits);
+
+        Node spawnParent = _player.GetParentOrNull<Node>() ?? _player;
+        spawnParent.AddChild(grenade);
+        grenade.Configure(_devGrenade, origin, _player.AimDirection, _player);
+
+        _grenadeCooldownRemaining = _devGrenade.FuseSeconds;
     }
 
     private static void ApplyDevTargetDebugDamage(Node colliderNode, int damage)
