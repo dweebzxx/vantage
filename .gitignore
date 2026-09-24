@@ -18,7 +18,7 @@ dist/
 .idea/
 properties.godot.cfg
 
-# Workflow-internal (Tier 2 — lives in .private/, symlinked in)
+# Workflow-internal (Tier 2 — lives in .vantage-private/, symlinked in)
 /AGENTS.md
 /CLAUDE.md
 /metadata-schema.json
@@ -29,12 +29,12 @@ properties.godot.cfg
 /.codex/
 /.claude/
 /audit/
-/.private/
+/.vantage-private/
 
 # NOTE: a trailing-slash gitignore pattern (e.g. /scripts/) only matches a real
 # directory, not a symlink — even a symlink pointing at a directory. Since
 # scripts/, .agents/, .codex/, .claude/, and audit/ at the project root are
-# symlinks (or contain symlinks) into .private/, repeat them here without the
+# symlinks (or contain symlinks) into .vantage-private/, repeat them here without the
 # trailing slash so they are actually excluded.
 /scripts
 /.agents
@@ -45,19 +45,19 @@ properties.godot.cfg
 # Tool-managed local state (not versioned)
 /.antigravitycli/
 
-# Build-report split (reports/metadata-reports symlinked to .private/; rest local-only)
+# Build-report split (reports/metadata-reports symlinked to .vantage-private/; rest local-only)
 build-report-logs/launchers/
 build-report-logs/logs/
 build-report-logs/prompts/
 build-report-logs/reports/
 build-report-logs/metadata-reports/
 
-# Project-specific Tier 2 — lives in .private/, symlinked in
+# Project-specific Tier 2 — lives in .vantage-private/, symlinked in
 /docs/
 /vantage_core_doc.md
 /decision_log_and_open_questions.md
 
-# /docs is a symlink into .private/ — see trailing-slash note above
+# /docs is a symlink into .vantage-private/ — see trailing-slash note above
 /docs
 
 # Tier 1 — secrets (project-specific; add as needed)
