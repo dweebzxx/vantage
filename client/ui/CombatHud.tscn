@@ -1,0 +1,59 @@
+[gd_scene load_steps=2 format=3 uid="uid://dq4h6vw2n8s1x"]
+
+[ext_resource type="Script" path="res://ui/CombatHud.cs" id="1_hud01"]
+
+[node name="CombatHud" type="CanvasLayer"]
+script = ExtResource("1_hud01")
+
+[node name="Root" type="Control" parent="."]
+anchors_preset = 2
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_left = 24.0
+offset_top = -108.0
+offset_right = 320.0
+offset_bottom = -24.0
+grow_vertical = 0
+
+[node name="WeaponNameLabel" type="Label" parent="Root"]
+offset_right = 296.0
+offset_bottom = 23.0
+text = "Weapon: DevHitscan"
+
+[node name="FireCooldownRow" type="HBoxContainer" parent="Root"]
+offset_top = 30.0
+offset_right = 296.0
+offset_bottom = 54.0
+
+[node name="FireCooldownLabel" type="Label" parent="Root/FireCooldownRow"]
+custom_minimum_size = Vector2(60, 0)
+text = "Fire:"
+
+[node name="FireCooldownBar" type="ProgressBar" parent="Root/FireCooldownRow"]
+custom_minimum_size = Vector2(140, 0)
+size_flags_horizontal = 3
+max_value = 100.0
+show_percentage = false
+
+[node name="FireCooldownValueLabel" type="Label" parent="Root/FireCooldownRow"]
+custom_minimum_size = Vector2(60, 0)
+text = "READY"
+
+[node name="GrenadeCooldownRow" type="HBoxContainer" parent="Root"]
+offset_top = 60.0
+offset_right = 296.0
+offset_bottom = 84.0
+
+[node name="GrenadeCooldownLabel" type="Label" parent="Root/GrenadeCooldownRow"]
+custom_minimum_size = Vector2(60, 0)
+text = "Grenade:"
+
+[node name="GrenadeCooldownBar" type="ProgressBar" parent="Root/GrenadeCooldownRow"]
+custom_minimum_size = Vector2(140, 0)
+size_flags_horizontal = 3
+max_value = 100.0
+show_percentage = false
+
+[node name="GrenadeCooldownValueLabel" type="Label" parent="Root/GrenadeCooldownRow"]
+custom_minimum_size = Vector2(60, 0)
+text = "READY"

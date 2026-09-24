@@ -15,9 +15,6 @@ public partial class PlayerCombatController : Node
     public NodePath DevDebugShotLinePath { get; set; } = new("DevDebugShotLine");
 
     [Export]
-    public NodePath DevDebugActiveWeaponLabelPath { get; set; } = new("DevDebugActiveWeaponLabel");
-
-    [Export]
     public PackedScene? DevProjectileScene { get; set; }
 
     [Export]
@@ -30,25 +27,36 @@ public partial class PlayerCombatController : Node
 
     private PlayerController? _player;
     private Line2D? _devDebugShotLine;
-    private Label? _devDebugActiveWeaponLabel;
     private WeaponDef _activeWeapon = WeaponDef.DevHitscan;
     private double _cooldownRemaining;
     private double _shotVisibleRemaining;
     private double _grenadeCooldownRemaining;
 
+    /// <summary>Identifier of the currently active weapon, for HUD display.</summary>
+    public WeaponId ActiveWeaponId => _activeWeapon.Id;
+
+    /// <summary>Seconds remaining before the active weapon can fire again.</summary>
+    public double CooldownRemaining => _cooldownRemaining;
+
+    /// <summary>Total fire-interval seconds for the active weapon, for HUD normalization.</summary>
+    public double CooldownDuration => _activeWeapon.FireIntervalSeconds;
+
+    /// <summary>Seconds remaining before another grenade can be thrown.</summary>
+    public double GrenadeCooldownRemaining => _grenadeCooldownRemaining;
+
+    /// <summary>Total grenade-throw cooldown seconds, for HUD normalization.</summary>
+    public double GrenadeCooldownDuration => _devGrenade.FuseSeconds;
+
     public override void _Ready()
     {
         _player = GetParentOrNull<PlayerController>();
         _devDebugShotLine = GetNodeOrNull<Line2D>(DevDebugShotLinePath);
-        _devDebugActiveWeaponLabel = GetNodeOrNull<Label>(DevDebugActiveWeaponLabelPath);
 
         if (_devDebugShotLine is not null)
         {
             _devDebugShotLine.TopLevel = true;
             _devDebugShotLine.Visible = false;
         }
-
-        UpdateDevDebugActiveWeaponLabel();
     }
 
     public override void _Process(double delta)
@@ -101,16 +109,7 @@ public partial class PlayerCombatController : Node
         }
 
         _activeWeapon = weapon;
-        UpdateDevDebugActiveWeaponLabel();
         GD.Print($"[DevCombat] Active weapon switched to {_activeWeapon.Id}");
-    }
-
-    private void UpdateDevDebugActiveWeaponLabel()
-    {
-        if (_devDebugActiveWeaponLabel is not null)
-        {
-            _devDebugActiveWeaponLabel.Text = $"Weapon: {_activeWeapon.Id}";
-        }
     }
 
     private void FirePrimary()

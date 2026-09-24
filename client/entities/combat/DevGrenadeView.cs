@@ -10,9 +10,6 @@ using Vantage.Shared.Game;
 public partial class DevGrenadeView : Node2D
 {
     [Export]
-    public NodePath DevFuseCountdownLabelPath { get; set; } = new("DevFuseCountdownLabel");
-
-    [Export]
     public float ThrowSpeedUnitsPerSecond { get; set; } = 420.0f;
 
     [Export]
@@ -26,12 +23,6 @@ public partial class DevGrenadeView : Node2D
     private bool _traveling;
     private double _fuseRemainingSeconds;
     private bool _detonated;
-    private Label? _devFuseCountdownLabel;
-
-    public override void _Ready()
-    {
-        _devFuseCountdownLabel = GetNodeOrNull<Label>(DevFuseCountdownLabelPath);
-    }
 
     public void Configure(GrenadeDef grenadeDef, Vector2 originPosition, Vector2 direction, Node2D ownerToIgnore)
     {
@@ -44,8 +35,6 @@ public partial class DevGrenadeView : Node2D
         _travelTarget = originPosition + (safeDirection * ThrowDistanceUnits);
         _traveling = true;
         _fuseRemainingSeconds = grenadeDef.FuseSeconds;
-
-        UpdateFuseLabel();
     }
 
     public override void _PhysicsProcess(double delta)
@@ -72,19 +61,10 @@ public partial class DevGrenadeView : Node2D
         }
 
         _fuseRemainingSeconds -= delta;
-        UpdateFuseLabel();
 
         if (_fuseRemainingSeconds <= 0.0)
         {
             Detonate();
-        }
-    }
-
-    private void UpdateFuseLabel()
-    {
-        if (_devFuseCountdownLabel is not null)
-        {
-            _devFuseCountdownLabel.Text = Mathf.Max(0.0, (float)_fuseRemainingSeconds).ToString("0.0");
         }
     }
 

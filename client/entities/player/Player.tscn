@@ -1,9 +1,10 @@
-[gd_scene load_steps=6 format=3 uid="uid://b702jgo8j66mm"]
+[gd_scene load_steps=7 format=3 uid="uid://b702jgo8j66mm"]
 
 [ext_resource type="Script" path="res://entities/player/PlayerController.cs" id="1_8svrp"]
 [ext_resource type="Script" path="res://entities/player/PlayerCombatController.cs" id="2_jm4xy"]
 [ext_resource type="PackedScene" path="res://entities/combat/DevProjectileView.tscn" id="3_pjkm2"]
 [ext_resource type="PackedScene" path="res://entities/combat/DevGrenadeView.tscn" id="4_gr3n4"]
+[ext_resource type="PackedScene" path="res://ui/CombatHud.tscn" id="5_chud1"]
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_b21wc"]
 size = Vector2(32, 32)
@@ -43,11 +44,7 @@ visible = false
 width = 3.0
 default_color = Color(1, 0.15, 0.1, 1)
 
-[node name="DevDebugActiveWeaponLabel" type="Label" parent="DevDebugCombatController"]
-position = Vector2(-56, -60)
-size = Vector2(112, 20)
-text = "Weapon: DevHitscan"
-horizontal_alignment = 1
+[node name="CombatHud" parent="." instance=ExtResource("5_chud1")]
 
 [node name="DevPlaceholderCollision" type="CollisionShape2D" parent="."]
 shape = SubResource("RectangleShape2D_b21wc")
