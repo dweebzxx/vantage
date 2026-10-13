@@ -17,6 +17,7 @@ dist/
 .vscode/
 .idea/
 properties.godot.cfg
+/vantage-project-manager/
 
 # Workflow-internal (Tier 2 — lives in .vantage-private/, symlinked in)
 /AGENTS.md
