@@ -16,6 +16,7 @@ public partial class DevProjectileView : Area2D
     private double _lifetimeRemainingSeconds;
     private float _distanceTraveledUnits;
     private bool _resolved;
+    private bool _stoppedByBody;
     private Node2D? _ownerToIgnore;
 
     public override void _Ready()
@@ -57,6 +58,8 @@ public partial class DevProjectileView : Area2D
         }
     }
 
+    // Walls are static bodies. The scene keeps monitorable = true so GodotPhysics2D does not treat this
+    // area as static, because a static area never pairs with a static body and BodyEntered never fires.
     private void OnBodyEntered(Node2D body)
     {
         if (body == _ownerToIgnore)
@@ -64,11 +67,18 @@ public partial class DevProjectileView : Area2D
             return;
         }
 
+        _stoppedByBody = true;
         ResolveImpact();
     }
 
     private void OnAreaEntered(Area2D area)
     {
+        // A wall reached in the same physics step wins: the dummy takes no damage.
+        if (_stoppedByBody)
+        {
+            return;
+        }
+
         if (area is DevTargetDummy devTargetDummy)
         {
             int damage = DamageMath.DamageByRange(_weaponDef.Damage, _distanceTraveledUnits, _weaponDef.RangeUnits);

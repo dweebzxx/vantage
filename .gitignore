@@ -41,6 +41,7 @@ properties.godot.cfg
 /.agents
 /.codex
 /.claude
+/.grok
 /audit
 
 # Tool-managed local state (not versioned)

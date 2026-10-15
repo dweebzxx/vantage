@@ -1,17 +1,18 @@
-[gd_scene load_steps=4 format=3 uid="uid://cr7xa36sqwrxu"]
+[gd_scene format=3 uid="uid://cr7xa36sqwrxu"]
 
 [ext_resource type="PackedScene" path="res://scenes/dev/DevTilemapArena.tscn" id="1_dh6vw"]
-[ext_resource type="PackedScene" path="res://entities/player/Player.tscn" id="2_5tqfn"]
-[ext_resource type="PackedScene" path="res://entities/dev/DevTargetDummy.tscn" id="3_wx5fo"]
+[ext_resource type="PackedScene" uid="uid://b702jgo8j66mm" path="res://entities/player/Player.tscn" id="2_5tqfn"]
+[ext_resource type="PackedScene" uid="uid://dk04yjab8e18a" path="res://entities/dev/DevTargetDummy.tscn" id="3_wx5fo"]
 
-[node name="MovementSandbox" type="Node2D"]
+[node name="MovementSandbox" type="Node2D" unique_id=1615679378]
 
-[node name="DevTilemapArena" parent="." instance=ExtResource("1_dh6vw")]
+[node name="DevTilemapArena" parent="." unique_id=1714887403 instance=ExtResource("1_dh6vw")]
+position = Vector2(2, 1)
 
-[node name="Player" parent="." instance=ExtResource("2_5tqfn")]
+[node name="Player" parent="." unique_id=272611748 instance=ExtResource("2_5tqfn")]
 
-[node name="DevTargetDummy" parent="." instance=ExtResource("3_wx5fo")]
+[node name="DevTargetDummy" parent="." unique_id=1607291252 instance=ExtResource("3_wx5fo")]
 position = Vector2(160, 0)
 
-[node name="DevTargetDummy2" parent="." instance=ExtResource("3_wx5fo")]
+[node name="DevTargetDummy2" parent="." unique_id=800329683 instance=ExtResource("3_wx5fo")]
 position = Vector2(-160, 96)
