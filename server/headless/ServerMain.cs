@@ -78,9 +78,14 @@ public partial class ServerMain : Node
             }
             _arenaVerified = true;
         }
+        // Fixed authoritative tick order (R10): accepted input/selection, movement,
+        // hitscan/new attacks, projectile sweeps, grenade timers/detonation,
+        // damage/life-state/respawn, reliable events, due snapshots, history.
         _serverPeer!.PollTick(tick);
-        _world.RecordTick(tick);
+        _world.SimulateTick(tick);
+        _serverPeer.SendEvents();
         _serverPeer.SendSnapshots(tick);
+        _world.RecordTick(tick);
     }
 
     private void OnCancelKeyPress(object? sender, ConsoleCancelEventArgs args)

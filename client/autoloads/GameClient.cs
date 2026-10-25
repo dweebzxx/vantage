@@ -1,6 +1,7 @@
 using System.Globalization;
 using Godot;
 using Vantage.Shared.Protocol;
+using Vantage.Shared.Game;
 using Vantage.Shared.Net;
 using NumericsVector2 = System.Numerics.Vector2;
 
@@ -35,6 +36,19 @@ public partial class GameClient : Node
     private StateSnapshot? _lastSnapshot;
     private readonly Dictionary<uint, Node2D> _remotePlayers = new();
     private PackedScene? _remoteScene;
+    private PlayerCombatController? _combat;
+    private readonly Dictionary<uint, Node2D> _projectileViews = new();
+    private readonly Dictionary<uint, Node2D> _grenadeViews = new();
+    private readonly Dictionary<uint, (double Remaining, bool Defeat)> _flashes = new();
+    private readonly List<(Node2D Node, ProcessModeEnum Process, bool Visible, uint? Layer, bool? Monitoring)> _suspended = new();
+    private bool _localSuspended;
+    private uint _combatScriptTick;
+    private bool _sawDefeat;
+    private int _postDefeatPresses;
+    private bool _loggedRespawnSnapshot;
+    private (int Projectiles, int Grenades) _lastCounts = (-1, -1);
+    private static readonly string[] Scripts = ["east", "illegal", "idle", "fire-hitscan", "post-respawn", "blocked-hitscan", "fire-projectile", "blocked-projectile", "throw-grenade", "grenade-away", "grenade-owner", "mash-fire", "disconnect-fight", "disconnect-owned-grenade"];
+
 
     public override void _Ready()
     {
@@ -61,9 +75,9 @@ public partial class GameClient : Node
                     _port = port;
                     break;
                 case "--net-script":
-                    if (++i >= arguments.Length || arguments[i] is not ("east" or "illegal"))
+                    if (++i >= arguments.Length || !Scripts.Contains(arguments[i]))
                     {
-                        GD.PrintErr("[GameClient] error: --net-script requires east or illegal.");
+                        GD.PrintErr("[GameClient] error: --net-script requires a supported script name.");
                         GetTree().Quit(1);
                         return;
                     }
@@ -126,6 +140,10 @@ public partial class GameClient : Node
         _lastSnapshot = null;
         _snapshotsApplied = _snapshotsDropped = _badSent = 0;
         _mostOthersSeen = 0;
+        _combatScriptTick = 0;
+        _sawDefeat = _loggedRespawnSnapshot = false;
+        _postDefeatPresses = 0;
+        _lastCounts = (-1, -1);
         _clientTick = 0;
         _sent = 0;
         _loggedMissingPlayer = false;
@@ -140,6 +158,7 @@ public partial class GameClient : Node
             return;
         }
 
+        UpdateFlashes(delta);
         _peer.Poll();
         MultiplayerPeer.ConnectionStatus status = _peer.GetConnectionStatus();
         if (status == MultiplayerPeer.ConnectionStatus.Disconnected)
@@ -211,7 +230,8 @@ public partial class GameClient : Node
     {
         Vector2 move = Input.GetVector(MoveLeft, MoveRight, MoveUp, MoveDown);
         if (move.LengthSquared() > 1f) move = move.Normalized();
-        InputButtons buttons = InputButtons.None;
+        FindPlayer();
+        InputButtons buttons = _combat?.ActiveWeaponId == WeaponId.DevProjectile ? InputButtons.SelectSlot2 : InputButtons.SelectSlot1;
         if (Input.IsActionPressed(PrimaryFire)) buttons |= InputButtons.PrimaryFire;
         if (Input.IsActionPressed(GrenadeThrow)) buttons |= InputButtons.Grenade;
 
@@ -229,7 +249,8 @@ public partial class GameClient : Node
 
     private InputCommand ScriptedInput(uint tick)
     {
-        if (_smokeScript == "east") return new(tick, NumericsVector2.UnitX, 0f, InputButtons.None);
+        if (_smokeScript == "east") return new(tick, NumericsVector2.UnitX, 0f, InputButtons.SelectSlot1);
+        if (_smokeScript == "idle") return new(tick, NumericsVector2.Zero, 0f, InputButtons.SelectSlot1);
         if (_smokeScript == "illegal")
         {
             uint third = _smokeTicks!.Value / 3;
@@ -240,8 +261,9 @@ public partial class GameClient : Node
                     1 => new(float.NaN, 0f),
                     _ => new(0f, float.PositiveInfinity),
                 } : new(-0.1f, 0f);
-            return new(tick, move, 0f, InputButtons.None);
+            return new(tick, move, 0f, InputButtons.SelectSlot1);
         }
+        if (_smokeScript != "default") return CombatScriptedInput(tick);
         return DefaultScriptedInput(tick);
     }
 
@@ -253,8 +275,48 @@ public partial class GameClient : Node
             2u => new NumericsVector2(-0.5f, 0.5f),
             _ => NumericsVector2.Zero,
         }, (tick % 32u) * 0.1f,
-        (tick % 2u == 0 ? InputButtons.PrimaryFire : InputButtons.None) |
+        InputButtons.SelectSlot1 | (tick % 2u == 0 ? InputButtons.PrimaryFire : InputButtons.None) |
         (tick % 7u == 0 ? InputButtons.Grenade : InputButtons.None));
+
+    private InputCommand CombatScriptedInput(uint tick)
+    {
+        bool projectile = _smokeScript is "fire-projectile" or "blocked-projectile";
+        InputButtons buttons = projectile ? InputButtons.SelectSlot2 : InputButtons.SelectSlot1;
+        var own = _lastSnapshot?.Players.FirstOrDefault(p => p.EntityId == _entityId);
+        var other = _lastSnapshot?.Players.FirstOrDefault(p => p.EntityId != _entityId);
+        if (own is not PlayerState self || self.EntityId == 0 || other is not PlayerState target || target.EntityId == 0)
+            return new(tick, NumericsVector2.Zero, 0, buttons);
+        var difference = target.Position - self.Position;
+        float aim = MathF.Atan2(difference.Y, difference.X);
+        // Geometry setup is based on observed position, never a hardcoded entity id.
+        if ((_smokeScript is "fire-projectile" or "grenade-owner") && _combatScriptTick == 0 && self.Position.Y < 94)
+            return new(tick, NumericsVector2.UnitY, aim, buttons);
+        if (_smokeScript == "blocked-hitscan" && self.Position.X < 240)
+            return new(tick, NumericsVector2.UnitX, aim, buttons);
+        uint phase = ++_combatScriptTick;
+        if (phase <= 90) return new(tick, NumericsVector2.Zero, aim, buttons);
+        uint fireTick = phase - 91;
+        bool press = _smokeScript switch
+        {
+            "mash-fire" => fireTick < 90 && fireTick % 2 == 0,
+            "throw-grenade" or "grenade-away" or "grenade-owner" or "disconnect-fight" or "disconnect-owned-grenade" => fireTick == 0,
+            _ => fireTick % (projectile ? 45u : 20u) == 0,
+        };
+        if (_smokeScript is "grenade-away" or "disconnect-fight") aim += MathF.PI;
+        if (_smokeScript == "grenade-owner") aim = -MathF.PI / 2;
+        if (_sawDefeat && _smokeScript != "mash-fire")
+        {
+            if (_smokeScript != "post-respawn" || _postDefeatPresses >= 1) press = false;
+            else if (press) _postDefeatPresses++;
+        }
+        if (press)
+        {
+            buttons |= _smokeScript is "throw-grenade" or "grenade-away" or "grenade-owner" or "disconnect-fight" or "disconnect-owned-grenade" ? InputButtons.Grenade : InputButtons.PrimaryFire;
+            GD.Print($"[GameClient] request script={_smokeScript}; client-tick={tick}; phase={fireTick}; buttons={buttons}; aim={aim}");
+        }
+        var move = _smokeScript == "grenade-owner" && fireTick > 0 && fireTick <= 90 ? -NumericsVector2.UnitY : NumericsVector2.Zero;
+        return new(tick, move, aim, buttons);
+    }
 
     private void FindPlayer()
     {
@@ -263,6 +325,22 @@ public partial class GameClient : Node
         {
             _player = scene?.FindChildren("*", "", true, false).OfType<PlayerController>().FirstOrDefault();
             if (_player is not null) _player.ViewOnly = _entityId.HasValue;
+        }
+        _combat = _player?.GetNodeOrNull<PlayerCombatController>("DevDebugCombatController");
+        if (_combat is not null) _combat.NetworkConnected = _connected;
+        if (_connected && !_localSuspended && scene is not null)
+        {
+            _localSuspended = true;
+            foreach (var node in scene.FindChildren("*", "", true, false).OfType<Node2D>())
+            {
+                if (node is not (DevTargetDummy or DevProjectileView or DevGrenadeView)) continue;
+                uint? layer = node is DevTargetDummy dummy ? dummy.CollisionLayer : null;
+                _suspended.Add((node, node.ProcessMode, node.Visible, layer, (node as Area2D)?.Monitoring));
+                node.ProcessMode = ProcessModeEnum.Disabled;
+                if (node is Area2D area) area.Monitoring = false;
+                if (node is DevTargetDummy target) target.CollisionLayer = 0;
+                else node.Visible = false;
+            }
         }
     }
 
@@ -282,6 +360,19 @@ public partial class GameClient : Node
                 _entityId = welcome.EntityId;
                 if (_player is not null) _player.ViewOnly = true;
                 GD.Print($"[GameClient] welcome entity={_entityId}; protocol={welcome.ProtocolVersion}");
+            }
+            else if (MessageCodec.TryDecodeHit(packet, out HitEvent hit))
+                LogEvent("hit", hit.ServerTick, hit.SourceEntityId, hit.TargetEntityId, null);
+            else if (MessageCodec.TryDecodeDamage(packet, out DamageDealtEvent damage))
+            {
+                LogEvent("damage", damage.ServerTick, damage.SourceEntityId, damage.TargetEntityId, damage.Amount);
+                Flash(damage.TargetEntityId, false);
+            }
+            else if (MessageCodec.TryDecodeDefeat(packet, out DefeatEvent defeat))
+            {
+                LogEvent("defeat", defeat.ServerTick, defeat.SourceEntityId, defeat.TargetEntityId, null);
+                Flash(defeat.TargetEntityId, true);
+                if (defeat.TargetEntityId != _entityId) _sawDefeat = true;
             }
             else if (MessageCodec.TryDecodeSnapshot(packet, out StateSnapshot? snapshot))
             {
@@ -328,6 +419,70 @@ public partial class GameClient : Node
             _remotePlayers.Remove(id);
         }
         _mostOthersSeen = Math.Max(_mostOthersSeen, present.Count);
+        UpdateAttackViews(_projectileViews, snapshot.Projectiles.Select(p => (p.EntityId, p.Position)), "NetworkProjectile");
+        UpdateAttackViews(_grenadeViews, snapshot.Grenades.Select(g => (g.EntityId, g.Position)), "NetworkGrenade");
+        var counts = (snapshot.Projectiles.Length, snapshot.Grenades.Length);
+        if (counts != _lastCounts)
+        {
+            GD.Print($"[GameClient] attacks tick={snapshot.ServerTick}; projectiles={counts.Item1}; grenades={counts.Item2}");
+            _lastCounts = counts;
+        }
+        if (_sawDefeat && !_loggedRespawnSnapshot)
+        {
+            foreach (var p in snapshot.Players) GD.Print($"[GameClient] after-defeat snapshot tick={snapshot.ServerTick}; entity={p.EntityId}; position={p.Position}");
+            _loggedRespawnSnapshot = true;
+        }
+    }
+
+    private static void LogEvent(string type, uint tick, uint source, uint target, int? amount) =>
+        GD.Print($"[GameClient] event={type}; tick={tick}; source={source}; target={target}; amount={amount}");
+
+    private void UpdateAttackViews(Dictionary<uint, Node2D> views, IEnumerable<(uint Id, NumericsVector2 Position)> states, string scene)
+    {
+        var present = new HashSet<uint>();
+        foreach (var state in states)
+        {
+            present.Add(state.Id);
+            if (!views.TryGetValue(state.Id, out var view))
+            {
+                view = GD.Load<PackedScene>($"res://entities/combat/{scene}.tscn").Instantiate<Node2D>();
+                (_player?.GetParent() ?? this).AddChild(view);
+                views.Add(state.Id, view);
+            }
+            view.GlobalPosition = new(state.Position.X, state.Position.Y);
+        }
+        foreach (uint id in views.Keys.Where(id => !present.Contains(id)).ToArray())
+        {
+            views[id].QueueFree();
+            views.Remove(id);
+        }
+    }
+
+    private Node2D? PlayerView(uint id) => id == _entityId ? _player : _remotePlayers.GetValueOrDefault(id);
+    private void Flash(uint id, bool defeat)
+    {
+        if (_flashes.TryGetValue(id, out var previous) && previous.Defeat && !defeat) return;
+        _flashes[id] = (defeat ? 0.5 : 0.12, defeat);
+        var view = PlayerView(id);
+        if (IsInstanceValid(view)) view!.Modulate = defeat ? new Color(1, 0.15f, 0.65f) : new Color(1, 1, 0.2f);
+    }
+    private void UpdateFlashes(double delta)
+    {
+        foreach (var (id, flash) in _flashes.ToArray())
+        {
+            if (flash.Remaining > delta)
+            {
+                _flashes[id] = (flash.Remaining - delta, flash.Defeat);
+                var activeView = PlayerView(id);
+                if (IsInstanceValid(activeView)) activeView!.Modulate = flash.Defeat ? new Color(1, 0.15f, 0.65f) : new Color(1, 1, 0.2f);
+            }
+            else
+            {
+                var view = PlayerView(id);
+                if (IsInstanceValid(view)) view!.Modulate = Colors.White;
+                _flashes.Remove(id);
+            }
+        }
     }
 
     private void LogSmokeResult()
@@ -373,6 +528,27 @@ public partial class GameClient : Node
 
     private void ClearPeer()
     {
+        if (IsInstanceValid(_combat)) _combat!.NetworkConnected = false;
+        foreach (uint id in _flashes.Keys)
+        {
+            var view = PlayerView(id);
+            if (IsInstanceValid(view)) view!.Modulate = Colors.White;
+        }
+        _flashes.Clear();
+        foreach (var item in _suspended)
+        {
+            if (!IsInstanceValid(item.Node)) continue;
+            item.Node.ProcessMode = item.Process;
+            item.Node.Visible = item.Visible;
+            if (item.Node is DevTargetDummy dummy && item.Layer is uint layer) dummy.CollisionLayer = layer;
+            if (item.Node is Area2D area && item.Monitoring is bool monitoring) area.Monitoring = monitoring;
+        }
+        _suspended.Clear();
+        _localSuspended = false;
+        foreach (var view in _projectileViews.Values.Concat(_grenadeViews.Values))
+            if (IsInstanceValid(view)) view.QueueFree();
+        _projectileViews.Clear();
+        _grenadeViews.Clear();
         if (IsInstanceValid(_player)) _player!.ViewOnly = false;
         foreach (Node2D view in _remotePlayers.Values)
             if (IsInstanceValid(view)) view.QueueFree();

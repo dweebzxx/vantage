@@ -63,11 +63,19 @@ public sealed class ServerPeer(World world) : IDisposable
         foreach (var (id, counters) in _clients)
         {
             // 0 is the no-accepted-input sentinel; first client input tick is 1.
-            var snapshot = new StateSnapshot(tick, counters.LatestAccepted?.ClientTick ?? 0u, players, [], []);
+            var snapshot = new StateSnapshot(tick, counters.LatestAccepted?.ClientTick ?? 0u, players, world.CaptureProjectiles(), world.CaptureGrenades());
             Send(id, MessageCodec.EncodeSnapshot(snapshot), TransportConstants.SnapshotChannel,
                 MultiplayerPeer.TransferModeEnum.Unreliable);
         }
         _peer.Host.Flush();
+    }
+
+    public void SendEvents()
+    {
+        foreach (byte[] packet in world.Events)
+            foreach (int id in _clients.Keys)
+                Send(id, packet, TransportConstants.EventChannel, MultiplayerPeer.TransferModeEnum.Reliable);
+        if (world.Events.Count > 0) _peer.Host.Flush();
     }
 
     private void Send(int id, byte[] packet, int channel, MultiplayerPeer.TransferModeEnum mode)

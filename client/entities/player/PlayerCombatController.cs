@@ -2,8 +2,8 @@ using Godot;
 using Vantage.Shared.Game;
 
 /// <summary>
-/// Dev-only local combat probe for the movement sandbox.
-/// Real gameplay systems, replication, and protocol are intentionally out of scope.
+/// Offline dev combat for the movement sandbox. Connected combat is requested
+/// through GameClient and resolved by the server; local combat is suppressed.
 /// </summary>
 [GlobalClass]
 public partial class PlayerCombatController : Node
@@ -22,6 +22,8 @@ public partial class PlayerCombatController : Node
 
     [Export]
     public PackedScene? DevGrenadeScene { get; set; }
+
+    public bool NetworkConnected { get; set; }
 
     private readonly GrenadeDef _devGrenade = GrenadeDef.DevPlaceholder;
 
@@ -89,6 +91,10 @@ public partial class PlayerCombatController : Node
         {
             SwitchActiveWeapon(WeaponDef.DevProjectile);
         }
+
+        // While connected all combat comes from the server. Selection stays local
+        // for the level-triggered input bit. No local ray/damage/spawn path runs.
+        if (NetworkConnected || _player?.ViewOnly == true) return;
 
         if (Input.IsActionJustPressed("primary_fire") && _cooldownRemaining <= 0.0)
         {

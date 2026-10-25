@@ -57,6 +57,13 @@ public static class MessageCodec
     public static bool TryDecodeWelcome(ReadOnlySpan<byte> packet, out WelcomeMessage welcome) =>
         TryDecode(packet, MessageType.Welcome, out welcome);
 
+    public static byte[] EncodeHit(HitEvent value) => Encode(MessageType.Hit, value);
+    public static byte[] EncodeDamage(DamageDealtEvent value) => Encode(MessageType.DamageDealt, value);
+    public static byte[] EncodeDefeat(DefeatEvent value) => Encode(MessageType.Defeat, value);
+    public static bool TryDecodeHit(ReadOnlySpan<byte> packet, out HitEvent value) => TryDecode(packet, MessageType.Hit, out value);
+    public static bool TryDecodeDamage(ReadOnlySpan<byte> packet, out DamageDealtEvent value) => TryDecode(packet, MessageType.DamageDealt, out value);
+    public static bool TryDecodeDefeat(ReadOnlySpan<byte> packet, out DefeatEvent value) => TryDecode(packet, MessageType.Defeat, out value);
+
     private static byte[] Encode<T>(MessageType type, T message)
     {
         byte[] payload = MemoryPackSerializer.Serialize(message);

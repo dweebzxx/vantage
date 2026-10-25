@@ -7,6 +7,7 @@ public static class TransportConstants
     public const int MaxClients = 2;
     public const int InputSendRateHz = 60;
     public const int WelcomeChannel = 0;
+    public const int EventChannel = WelcomeChannel;
     public const int SnapshotChannel = 2;
     public const int SnapshotIntervalTicks = 2;
     public const int InputChannel = 1;

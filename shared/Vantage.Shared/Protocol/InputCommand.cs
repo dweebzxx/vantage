@@ -10,6 +10,8 @@ public enum InputButtons : byte
     PrimaryFire = 1,
     SecondaryFire = 2,
     Grenade = 4,
+    SelectSlot1 = 8,
+    SelectSlot2 = 16,
 }
 
 [MemoryPackable]

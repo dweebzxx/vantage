@@ -11,6 +11,7 @@ public sealed class PeerInputCounters(int peerId)
     public ulong Accepted { get; private set; }
     public ulong Rejected { get; private set; }
     public ulong OutOfOrder { get; private set; }
+    public PendingCombatPresses Presses { get; } = new();
     public InputCommand? LatestAccepted { get; private set; }
 
     public void Receive(byte[] packet)
@@ -35,6 +36,7 @@ public sealed class PeerInputCounters(int peerId)
             return;
         }
 
+        Presses.Accept(input);
         LatestAccepted = input;
         Accepted++;
     }

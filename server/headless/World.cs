@@ -17,7 +17,16 @@ public partial class World : Node
     private uint _nextEntityId = 1;
     private Node2D _arena = null!;
 
-    private sealed record ServerPlayer(uint EntityId, int SpawnIndex, CharacterBody2D Body, PeerInputCounters Input);
+    private readonly WeaponSystem _weapons = new();
+    private readonly GrenadeSystem _grenades = new();
+    public List<byte[]> Events { get; } = new();
+    public ProjectileState[] CaptureProjectiles() => _weapons.Capture();
+    public GrenadeState[] CaptureGrenades() => _grenades.Capture();
+    public uint AllocateEntityId()
+    {
+        if (_nextEntityId == 0) throw new InvalidOperationException("Entity id space exhausted.");
+        return _nextEntityId++;
+    }
 
     public WorldState CurrentState { get; private set; } = new(0u, Array.Empty<PlayerState>());
     public TickStateRingBuffer<WorldState> History { get; } = new(HistoryCapacity);
@@ -37,8 +46,11 @@ public partial class World : Node
         {
             using var query = new PhysicsShapeQueryParameters2D
             {
-                Shape = shape, Transform = new Transform2D(0, spawn),
-                CollisionMask = 1, CollideWithBodies = true, CollideWithAreas = false,
+                Shape = shape,
+                Transform = new Transform2D(0, spawn),
+                CollisionMask = 1,
+                CollideWithBodies = true,
+                CollideWithAreas = false,
             };
             int count = space.IntersectShape(query).Count;
             GD.Print($"[Arena] spawn={spawn}; wall overlaps={count}");
@@ -51,12 +63,16 @@ public partial class World : Node
     {
         int slot = Array.FindIndex(_occupiedSpawns, occupied => !occupied);
         if (slot < 0 || _nextEntityId == 0) throw new InvalidOperationException("No spawn or entity id available.");
-        uint entityId = _nextEntityId++;
+        uint entityId = AllocateEntityId();
         var body = new CharacterBody2D
         {
-            Name = $"Player{entityId}", Position = Spawns[slot], CollisionLayer = 1, CollisionMask = 1,
+            Name = $"Player{entityId}",
+            Position = Spawns[slot],
+            CollisionLayer = 1,
+            CollisionMask = 1,
             // Players block each other; they must never carry each other as moving platforms.
-            PlatformFloorLayers = 0, PlatformWallLayers = 0,
+            PlatformFloorLayers = 0,
+            PlatformWallLayers = 0,
         };
         body.AddChild(new CollisionShape2D { Shape = new RectangleShape2D { Size = new Vector2(32, 32) } });
         _arena.GetParent().AddChild(body);
@@ -78,9 +94,26 @@ public partial class World : Node
         new PlayerState(p.EntityId, new(p.Body.GlobalPosition.X, p.Body.GlobalPosition.Y),
             p.Input.LatestAccepted?.AimAngleRadians ?? 0f)).ToArray();
 
+    public void SimulateTick(uint tick)
+    {
+        Events.Clear();
+        var players = _players.Values.ToArray();
+        var damage = new List<PendingDamage>();
+        foreach (var player in players) WeaponSystem.SelectAndAdvanceCooldowns(player);
+        foreach (var player in players) MovementSystem.Step(player.Body, player.Input);
+        foreach (var player in players)
+        {
+            var presses = player.Input.Presses.Consume();
+            if (presses.FireAim is float fireAim) _weapons.Fire(tick, player, fireAim, _arena.GetWorld2D().DirectSpaceState, players, AllocateEntityId, damage);
+            if (presses.GrenadeAim is float grenadeAim) _grenades.Throw(tick, player, grenadeAim, AllocateEntityId);
+        }
+        _weapons.StepProjectiles(tick, _arena.GetWorld2D().DirectSpaceState, players, damage);
+        _grenades.Step(tick, players, damage);
+        DamageSystem.Resolve(tick, damage, Events);
+    }
+
     public void RecordTick(uint tick)
     {
-        foreach (ServerPlayer player in _players.Values) MovementSystem.Step(player.Body, player.Input);
         CurrentState = new(tick, Array.AsReadOnly(CapturePlayers()));
         History.Add(tick, CurrentState);
         if (tick % TickMath.SimulationRateHz == 0)
