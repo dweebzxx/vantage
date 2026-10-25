@@ -1,6 +1,7 @@
 using System.Globalization;
 using Godot;
 using Vantage.Shared.Protocol;
+using Vantage.Shared.Net;
 using NumericsVector2 = System.Numerics.Vector2;
 
 public partial class GameClient : Node
@@ -23,6 +24,17 @@ public partial class GameClient : Node
     private bool _quitAfterDisconnect;
     private bool _loggedMissingPlayer;
     private bool _smokeFinished;
+
+    private string _smokeScript = "default";
+    private uint? _entityId;
+    private uint? _lastSnapshotTick;
+    private ulong _snapshotsApplied;
+    private ulong _snapshotsDropped;
+    private ulong _badSent;
+    private int _mostOthersSeen;
+    private StateSnapshot? _lastSnapshot;
+    private readonly Dictionary<uint, Node2D> _remotePlayers = new();
+    private PackedScene? _remoteScene;
 
     public override void _Ready()
     {
@@ -47,6 +59,15 @@ public partial class GameClient : Node
                         return;
                     }
                     _port = port;
+                    break;
+                case "--net-script":
+                    if (++i >= arguments.Length || arguments[i] is not ("east" or "illegal"))
+                    {
+                        GD.PrintErr("[GameClient] error: --net-script requires east or illegal.");
+                        GetTree().Quit(1);
+                        return;
+                    }
+                    _smokeScript = arguments[i];
                     break;
                 case "--net-smoke":
                     if (++i >= arguments.Length ||
@@ -100,6 +121,11 @@ public partial class GameClient : Node
         _peer.TransferMode = MultiplayerPeer.TransferModeEnum.UnreliableOrdered;
         _peer.TransferChannel = TransportConstants.InputChannel;
         _peer.SetTargetPeer(1);
+        _entityId = null;
+        _lastSnapshotTick = null;
+        _lastSnapshot = null;
+        _snapshotsApplied = _snapshotsDropped = _badSent = 0;
+        _mostOthersSeen = 0;
         _clientTick = 0;
         _sent = 0;
         _loggedMissingPlayer = false;
@@ -146,6 +172,9 @@ public partial class GameClient : Node
             _connected = true;
             GD.Print($"[GameClient] connected peer={_peer.GetUniqueId()}; input rate={TransportConstants.InputSendRateHz} Hz; first client tick=1");
         }
+        FindPlayer();
+        ReceiveMessages();
+        if (_peer is null || _disconnecting) return;
         if (_smokeFinished)
         {
             // Give the final flushed input a separate polling turn from the
@@ -166,12 +195,14 @@ public partial class GameClient : Node
             return;
         }
         _sent++;
+        if (!input.IsInRange()) _badSent++;
+        if (_clientTick % TickMath.SimulationRateHz == 0)
+            GD.Print($"[GameClient] snapshots applied={_snapshotsApplied}; dropped={_snapshotsDropped}; displayed={_player?.GlobalPosition}; view-only={_player?.ViewOnly}");
         // Submit this physics tick's input now rather than batching it with the
         // next tick during Poll. This also drains the final smoke input.
         _peer.Host.Flush();
         if (_smokeTicks.HasValue && _sent == _smokeTicks.Value)
         {
-            GD.Print($"[GameClient] smoke complete; sent={_sent}");
             _smokeFinished = true;
         }
     }
@@ -184,11 +215,7 @@ public partial class GameClient : Node
         if (Input.IsActionPressed(PrimaryFire)) buttons |= InputButtons.PrimaryFire;
         if (Input.IsActionPressed(GrenadeThrow)) buttons |= InputButtons.Grenade;
 
-        Node? scene = GetTree().CurrentScene;
-        if (!IsInstanceValid(_player) || scene is null || !scene.IsAncestorOf(_player))
-        {
-            _player = scene?.FindChildren("*", "", true, false).OfType<PlayerController>().FirstOrDefault();
-        }
+        FindPlayer();
         if (_player is null && !_loggedMissingPlayer)
         {
             GD.Print("[GameClient] no player in current scene; sending aim=0");
@@ -200,7 +227,25 @@ public partial class GameClient : Node
         return new(tick, new NumericsVector2(move.X, move.Y), _player?.AimAngleRadians ?? 0f, buttons);
     }
 
-    private static InputCommand ScriptedInput(uint tick) => new(tick,
+    private InputCommand ScriptedInput(uint tick)
+    {
+        if (_smokeScript == "east") return new(tick, NumericsVector2.UnitX, 0f, InputButtons.None);
+        if (_smokeScript == "illegal")
+        {
+            uint third = _smokeTicks!.Value / 3;
+            NumericsVector2 move = tick <= third ? new(0.1f, 0f) :
+                tick <= third * 2 ? (tick % 3) switch
+                {
+                    0 => new(100f, -100f),
+                    1 => new(float.NaN, 0f),
+                    _ => new(0f, float.PositiveInfinity),
+                } : new(-0.1f, 0f);
+            return new(tick, move, 0f, InputButtons.None);
+        }
+        return DefaultScriptedInput(tick);
+    }
+
+    private static InputCommand DefaultScriptedInput(uint tick) => new(tick,
         (tick % 4u) switch
         {
             0u => new NumericsVector2(1f, 0f),
@@ -210,6 +255,89 @@ public partial class GameClient : Node
         }, (tick % 32u) * 0.1f,
         (tick % 2u == 0 ? InputButtons.PrimaryFire : InputButtons.None) |
         (tick % 7u == 0 ? InputButtons.Grenade : InputButtons.None));
+
+    private void FindPlayer()
+    {
+        Node? scene = GetTree().CurrentScene;
+        if (!IsInstanceValid(_player) || scene is null || !scene.IsAncestorOf(_player))
+        {
+            _player = scene?.FindChildren("*", "", true, false).OfType<PlayerController>().FirstOrDefault();
+            if (_player is not null) _player.ViewOnly = _entityId.HasValue;
+        }
+    }
+
+    private void ReceiveMessages()
+    {
+        while (_peer is not null && _peer.GetAvailablePacketCount() > 0)
+        {
+            byte[] packet = _peer.GetPacket();
+            if (MessageCodec.TryDecodeWelcome(packet, out WelcomeMessage welcome))
+            {
+                if (welcome.ProtocolVersion != ProtocolConstants.ProtocolVersion)
+                {
+                    GD.PrintErr($"[GameClient] protocol mismatch: server={welcome.ProtocolVersion}; client={ProtocolConstants.ProtocolVersion}");
+                    BeginDisconnect(false);
+                    return;
+                }
+                _entityId = welcome.EntityId;
+                if (_player is not null) _player.ViewOnly = true;
+                GD.Print($"[GameClient] welcome entity={_entityId}; protocol={welcome.ProtocolVersion}");
+            }
+            else if (MessageCodec.TryDecodeSnapshot(packet, out StateSnapshot? snapshot))
+            {
+                if (!_entityId.HasValue || (_lastSnapshotTick.HasValue &&
+                    !TickMath.IsNewerThan(snapshot!.ServerTick, _lastSnapshotTick.Value)))
+                {
+                    _snapshotsDropped++;
+                    continue;
+                }
+                ApplySnapshot(snapshot!);
+            }
+        }
+    }
+
+    private void ApplySnapshot(StateSnapshot snapshot)
+    {
+        _lastSnapshot = snapshot;
+        _lastSnapshotTick = snapshot.ServerTick;
+        _snapshotsApplied++;
+        var present = new HashSet<uint>();
+        foreach (PlayerState player in snapshot.Players)
+        {
+            Vector2 position = new(player.Position.X, player.Position.Y);
+            if (player.EntityId == _entityId)
+            {
+                _player?.ApplySnapshot(position, player.AimAngleRadians);
+                continue;
+            }
+            present.Add(player.EntityId);
+            if (!_remotePlayers.TryGetValue(player.EntityId, out Node2D? view))
+            {
+                if (_player is null) continue;
+                _remoteScene ??= GD.Load<PackedScene>("res://entities/player/RemotePlayer.tscn");
+                view = _remoteScene.Instantiate<Node2D>();
+                _player.GetParent().AddChild(view);
+                _remotePlayers.Add(player.EntityId, view);
+            }
+            view.GlobalPosition = position;
+            view.GetNode<Node2D>("DevDebugAimPivot").Rotation = player.AimAngleRadians;
+        }
+        foreach (uint id in _remotePlayers.Keys.Where(id => !present.Contains(id)).ToArray())
+        {
+            if (IsInstanceValid(_remotePlayers[id])) _remotePlayers[id].QueueFree();
+            _remotePlayers.Remove(id);
+        }
+        _mostOthersSeen = Math.Max(_mostOthersSeen, present.Count);
+    }
+
+    private void LogSmokeResult()
+    {
+        if (!_smokeTicks.HasValue) return;
+        GD.Print($"[GameClient] smoke complete; sent={_sent}; bad-sent={_badSent}; last snapshot tick={_lastSnapshotTick}; entity={_entityId}; others-seen={_mostOthersSeen}; displayed={_player?.GlobalPosition}; view-only={_player?.ViewOnly}");
+        if (_lastSnapshot is not null)
+            foreach (PlayerState player in _lastSnapshot.Players)
+                GD.Print($"[GameClient] last snapshot entity={player.EntityId}; position={player.Position}");
+    }
 
     private void BeginDisconnect(bool quit)
     {
@@ -225,6 +353,7 @@ public partial class GameClient : Node
             return;
         }
 
+        LogSmokeResult();
         _disconnecting = true;
         _quitAfterDisconnect = quit;
         // DisconnectLater only waits for reliable packets. Flush the last
@@ -244,6 +373,13 @@ public partial class GameClient : Node
 
     private void ClearPeer()
     {
+        if (IsInstanceValid(_player)) _player!.ViewOnly = false;
+        foreach (Node2D view in _remotePlayers.Values)
+            if (IsInstanceValid(view)) view.QueueFree();
+        _remotePlayers.Clear();
+        _entityId = null;
+        _lastSnapshotTick = null;
+        _lastSnapshot = null;
         _peer?.Close();
         _peer?.Dispose();
         _peer = null;

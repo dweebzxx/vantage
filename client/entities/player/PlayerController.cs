@@ -1,14 +1,14 @@
 using Godot;
+using Vantage.Shared.Game;
 
 /// <summary>
-/// Local-only movement controller for the M2 movement sandbox.
-/// Network authority, prediction, replication, and protocol concerns are intentionally out of scope.
+/// Movement sandbox controller. Connected movement is displayed from server snapshots.
 /// </summary>
 [GlobalClass]
 public partial class PlayerController : CharacterBody2D
 {
     [Export]
-    public float MoveSpeed { get; set; } = 240.0f;
+    public float MoveSpeed { get; set; } = MovementMath.MoveSpeed;
 
     [Export]
     public NodePath DevDebugAimPivotPath { get; set; } = new("DevDebugAimPivot");
@@ -16,6 +16,14 @@ public partial class PlayerController : CharacterBody2D
     public Vector2 AimDirection { get; private set; } = Vector2.Right;
 
     public float AimAngleRadians { get; private set; }
+
+    public bool ViewOnly { get; set; }
+
+    public void ApplySnapshot(Vector2 position, float aimAngle)
+    {
+        GlobalPosition = position;
+        if (_devDebugAimPivot is not null) _devDebugAimPivot.Rotation = aimAngle;
+    }
 
     private Node2D? _devDebugAimPivot;
 
@@ -32,14 +40,15 @@ public partial class PlayerController : CharacterBody2D
 
     public override void _PhysicsProcess(double delta)
     {
-        Vector2 inputDirection = Input.GetVector("move_left", "move_right", "move_up", "move_down");
-
-        if (inputDirection.LengthSquared() > 1.0f)
+        if (ViewOnly)
         {
-            inputDirection = inputDirection.Normalized();
+            Velocity = Vector2.Zero;
+            return;
         }
-
-        Velocity = inputDirection * MoveSpeed;
+        Vector2 inputDirection = Input.GetVector("move_left", "move_right", "move_up", "move_down");
+        var velocity = MovementMath.VelocityFromMove(new(inputDirection.X, inputDirection.Y));
+        // Preserve the existing exported offline speed override.
+        Velocity = new Vector2(velocity.X, velocity.Y) * (MoveSpeed / MovementMath.MoveSpeed);
         MoveAndSlide();
     }
 
@@ -55,7 +64,7 @@ public partial class PlayerController : CharacterBody2D
         AimDirection = playerToMouse.Normalized();
         AimAngleRadians = AimDirection.Angle();
 
-        if (_devDebugAimPivot is not null)
+        if (!ViewOnly && _devDebugAimPivot is not null)
         {
             _devDebugAimPivot.Rotation = AimAngleRadians;
         }

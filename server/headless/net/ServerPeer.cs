@@ -5,7 +5,7 @@ using Vantage.Shared.Protocol;
 namespace Vantage.Server;
 
 // Raw ENet packets only; deliberately not assigned to SceneMultiplayer.
-public sealed class ServerPeer : IDisposable
+public sealed class ServerPeer(World world) : IDisposable
 {
     private readonly ENetMultiplayerPeer _peer = new();
     private readonly Dictionary<int, PeerInputCounters> _clients = new();
@@ -56,9 +56,36 @@ public sealed class ServerPeer : IDisposable
         }
     }
 
+    public void SendSnapshots(uint tick)
+    {
+        if (tick % TransportConstants.SnapshotIntervalTicks != 0) return;
+        PlayerState[] players = world.CapturePlayers();
+        foreach (var (id, counters) in _clients)
+        {
+            // 0 is the no-accepted-input sentinel; first client input tick is 1.
+            var snapshot = new StateSnapshot(tick, counters.LatestAccepted?.ClientTick ?? 0u, players, [], []);
+            Send(id, MessageCodec.EncodeSnapshot(snapshot), TransportConstants.SnapshotChannel,
+                MultiplayerPeer.TransferModeEnum.Unreliable);
+        }
+        _peer.Host.Flush();
+    }
+
+    private void Send(int id, byte[] packet, int channel, MultiplayerPeer.TransferModeEnum mode)
+    {
+        _peer.SetTargetPeer(id);
+        _peer.TransferChannel = channel;
+        _peer.TransferMode = mode;
+        Error error = _peer.PutPacket(packet);
+        if (error != Error.Ok) GD.PrintErr($"[NetServer] send failed peer={id}: {error}");
+    }
+
     private void OnConnected(long id)
     {
-        _clients[(int)id] = new PeerInputCounters((int)id);
+        var counters = new PeerInputCounters((int)id);
+        _clients[(int)id] = counters;
+        uint entityId = world.AddPlayer((int)id, counters);
+        Send((int)id, MessageCodec.EncodeWelcome(new(entityId, ProtocolConstants.ProtocolVersion)),
+            TransportConstants.WelcomeChannel, MultiplayerPeer.TransferModeEnum.Reliable);
         GD.Print($"[NetServer] connected peer={id}");
         if (_clients.Count == TransportConstants.MaxClients)
         {
@@ -72,6 +99,7 @@ public sealed class ServerPeer : IDisposable
     {
         if (_clients.Remove(id, out PeerInputCounters? counters))
         {
+            world.RemovePlayer(id);
             GD.Print($"[NetServer] disconnected ({reason}); final {counters}");
         }
     }

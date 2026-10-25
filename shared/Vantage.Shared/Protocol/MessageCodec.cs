@@ -41,4 +41,43 @@ public static class MessageCodec
             return false;
         }
     }
+
+    public static byte[] EncodeSnapshot(StateSnapshot snapshot) => Encode(MessageType.Snapshot, snapshot);
+    public static byte[] EncodeWelcome(WelcomeMessage welcome) => Encode(MessageType.Welcome, welcome);
+
+    public static bool TryDecodeSnapshot(ReadOnlySpan<byte> packet, out StateSnapshot? snapshot)
+    {
+        if (TryDecode(packet, MessageType.Snapshot, out snapshot) && snapshot is not null &&
+            snapshot.Players is not null && snapshot.Projectiles is not null && snapshot.Grenades is not null)
+            return true;
+        snapshot = null;
+        return false;
+    }
+
+    public static bool TryDecodeWelcome(ReadOnlySpan<byte> packet, out WelcomeMessage welcome) =>
+        TryDecode(packet, MessageType.Welcome, out welcome);
+
+    private static byte[] Encode<T>(MessageType type, T message)
+    {
+        byte[] payload = MemoryPackSerializer.Serialize(message);
+        return [(byte)type, .. payload];
+    }
+
+    private static bool TryDecode<T>(ReadOnlySpan<byte> packet, MessageType type, out T? message)
+    {
+        message = default;
+        if (packet.IsEmpty || packet[0] != (byte)type) return false;
+        try
+        {
+            T? decoded = default;
+            int consumed = MemoryPackSerializer.Deserialize(packet[1..], ref decoded);
+            if (consumed != packet.Length - 1) return false;
+            message = decoded;
+            return true;
+        }
+        catch (MemoryPackSerializationException)
+        {
+            return false;
+        }
+    }
 }

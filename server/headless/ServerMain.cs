@@ -14,6 +14,8 @@ public partial class ServerMain : Node
     private ulong _initialPhysicsFrame;
     private int _shutdownRequested;
     private ServerPeer? _serverPeer;
+    private bool _arenaVerified;
+    private bool _wallProbe;
 
     public override void _Ready()
     {
@@ -46,7 +48,9 @@ public partial class ServerMain : Node
 
         GD.Print($"[Server] port={Port} ({(suppliedPort ? "--port" : "default")})");
         GD.Print($"[Server] tick rate={Engine.PhysicsTicksPerSecond} Hz; initial tick=0");
-        _serverPeer = new ServerPeer();
+        _wallProbe = arguments.Contains("--wall-probe");
+        _world.Initialize();
+        _serverPeer = new ServerPeer(_world);
         Error error = _serverPeer.Start(Port);
         if (error != Error.Ok)
         {
@@ -55,9 +59,28 @@ public partial class ServerMain : Node
             GetTree().Quit(1);
             return;
         }
-        _tickLoop.Tick += _world.RecordTick;
-        _tickLoop.Tick += _serverPeer.PollTick;
+        _tickLoop.Tick += RunTick;
         Console.CancelKeyPress += OnCancelKeyPress;
+    }
+
+    private void RunTick(uint tick)
+    {
+        // TileMap physics registration needs a completed physics frame.
+        if (!_arenaVerified)
+        {
+            if (tick < 3) return;
+            if (!_world.VerifyArena(_wallProbe))
+            {
+                GD.PrintErr("[Server] arena verification failed; stopping before simulation.");
+                _tickLoop.SetPhysicsProcess(false);
+                GetTree().Quit(1);
+                return;
+            }
+            _arenaVerified = true;
+        }
+        _serverPeer!.PollTick(tick);
+        _world.RecordTick(tick);
+        _serverPeer.SendSnapshots(tick);
     }
 
     private void OnCancelKeyPress(object? sender, ConsoleCancelEventArgs args)
@@ -79,10 +102,9 @@ public partial class ServerMain : Node
     public override void _ExitTree()
     {
         Console.CancelKeyPress -= OnCancelKeyPress;
-        _tickLoop.Tick -= _world.RecordTick;
+        _tickLoop.Tick -= RunTick;
         if (_serverPeer is not null)
         {
-            _tickLoop.Tick -= _serverPeer.PollTick;
             _serverPeer.Dispose();
         }
         GD.Print($"[Server] final tick={_tickLoop.CurrentTick}; physics frames={Engine.GetPhysicsFrames() - _initialPhysicsFrame}");
