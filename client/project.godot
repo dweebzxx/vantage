@@ -14,6 +14,10 @@ config/name="Vantage Client"
 run/main_scene="res://scenes/dev/MovementSandbox.tscn"
 config/features=PackedStringArray("4.7", "C#", "Forward Plus")
 
+[autoload]
+
+GameClient="*res://autoloads/GameClient.cs"
+
 [dotnet]
 
 project/assembly_name="Vantage.Client"

@@ -1,17 +1,19 @@
 using System.Globalization;
 using Godot;
+using Vantage.Shared.Protocol;
 
 namespace Vantage.Server;
 
 public partial class ServerMain : Node
 {
-    public const int DefaultPort = 7777;
+    public const int DefaultPort = TransportConstants.DefaultPort;
     public int Port { get; private set; } = DefaultPort;
 
     private TickLoop _tickLoop = null!;
     private World _world = null!;
     private ulong _initialPhysicsFrame;
     private int _shutdownRequested;
+    private ServerPeer? _serverPeer;
 
     public override void _Ready()
     {
@@ -44,7 +46,17 @@ public partial class ServerMain : Node
 
         GD.Print($"[Server] port={Port} ({(suppliedPort ? "--port" : "default")})");
         GD.Print($"[Server] tick rate={Engine.PhysicsTicksPerSecond} Hz; initial tick=0");
+        _serverPeer = new ServerPeer();
+        Error error = _serverPeer.Start(Port);
+        if (error != Error.Ok)
+        {
+            GD.PrintErr($"[Server] ENet startup failed: {error}");
+            _tickLoop.SetPhysicsProcess(false);
+            GetTree().Quit(1);
+            return;
+        }
         _tickLoop.Tick += _world.RecordTick;
+        _tickLoop.Tick += _serverPeer.PollTick;
         Console.CancelKeyPress += OnCancelKeyPress;
     }
 
@@ -68,6 +80,11 @@ public partial class ServerMain : Node
     {
         Console.CancelKeyPress -= OnCancelKeyPress;
         _tickLoop.Tick -= _world.RecordTick;
+        if (_serverPeer is not null)
+        {
+            _tickLoop.Tick -= _serverPeer.PollTick;
+            _serverPeer.Dispose();
+        }
         GD.Print($"[Server] final tick={_tickLoop.CurrentTick}; physics frames={Engine.GetPhysicsFrames() - _initialPhysicsFrame}");
     }
 }
