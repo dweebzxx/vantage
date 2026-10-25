@@ -1,0 +1,14 @@
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://ServerMain.cs" id="1_main"]
+[ext_resource type="Script" path="res://TickLoop.cs" id="2_tick"]
+[ext_resource type="Script" path="res://World.cs" id="3_world"]
+
+[node name="ServerMain" type="Node"]
+script = ExtResource("1_main")
+
+[node name="TickLoop" type="Node" parent="."]
+script = ExtResource("2_tick")
+
+[node name="World" type="Node" parent="."]
+script = ExtResource("3_world")

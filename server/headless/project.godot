@@ -10,7 +10,12 @@ config_version=5
 [application]
 
 config/name="Vantage Headless Server"
+run/main_scene="res://ServerMain.tscn"
 config/features=PackedStringArray("4.7", "C#", "Forward Plus")
+
+[dotnet]
+
+project/assembly_name="Vantage.Server"
 
 [physics]
 
