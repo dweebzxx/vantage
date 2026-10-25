@@ -52,7 +52,12 @@ public partial class World : Node
         int slot = Array.FindIndex(_occupiedSpawns, occupied => !occupied);
         if (slot < 0 || _nextEntityId == 0) throw new InvalidOperationException("No spawn or entity id available.");
         uint entityId = _nextEntityId++;
-        var body = new CharacterBody2D { Name = $"Player{entityId}", Position = Spawns[slot], CollisionLayer = 1, CollisionMask = 1 };
+        var body = new CharacterBody2D
+        {
+            Name = $"Player{entityId}", Position = Spawns[slot], CollisionLayer = 1, CollisionMask = 1,
+            // Players block each other; they must never carry each other as moving platforms.
+            PlatformFloorLayers = 0, PlatformWallLayers = 0,
+        };
         body.AddChild(new CollisionShape2D { Shape = new RectangleShape2D { Size = new Vector2(32, 32) } });
         _arena.GetParent().AddChild(body);
         _occupiedSpawns[slot] = true;
