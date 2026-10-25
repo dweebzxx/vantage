@@ -43,6 +43,7 @@ public partial class GameClient : Node
     private readonly List<(Node2D Node, ProcessModeEnum Process, bool Visible, uint? Layer, bool? Monitoring)> _suspended = new();
     private bool _localSuspended;
     private uint _combatScriptTick;
+    private uint? _smokeGrenadeObservedTick;
     private bool _sawDefeat;
     private int _postDefeatPresses;
     private bool _loggedRespawnSnapshot;
@@ -141,6 +142,7 @@ public partial class GameClient : Node
         _snapshotsApplied = _snapshotsDropped = _badSent = 0;
         _mostOthersSeen = 0;
         _combatScriptTick = 0;
+        _smokeGrenadeObservedTick = null;
         _sawDefeat = _loggedRespawnSnapshot = false;
         _postDefeatPresses = 0;
         _lastCounts = (-1, -1);
@@ -190,6 +192,10 @@ public partial class GameClient : Node
         {
             _connected = true;
             GD.Print($"[GameClient] connected peer={_peer.GetUniqueId()}; input rate={TransportConstants.InputSendRateHz} Hz; first client tick=1");
+            // Smoke-only: keep interval/acceleration defaults; disable automatic
+            // throttle reduction for this peer in both directions. Manual play
+            // retains ENet defaults, including on F9 reconnect.
+            if (_smokeTicks.HasValue) _peer.GetPeer(1).ThrottleConfigure(5000, 2, 0);
         }
         FindPlayer();
         ReceiveMessages();
@@ -299,7 +305,10 @@ public partial class GameClient : Node
         bool press = _smokeScript switch
         {
             "mash-fire" => fireTick < 90 && fireTick % 2 == 0,
-            "throw-grenade" or "grenade-away" or "grenade-owner" or "disconnect-fight" or "disconnect-owned-grenade" => fireTick == 0,
+            // Smoke-only repeated presses tolerate a lost throw input. Stop on
+            // observed authoritative creation; never rerun the scenario.
+            "throw-grenade" or "grenade-away" or "grenade-owner" => !_smokeGrenadeObservedTick.HasValue && fireTick % 20 == 0,
+            "disconnect-fight" or "disconnect-owned-grenade" => fireTick == 0,
             _ => fireTick % (projectile ? 45u : 20u) == 0,
         };
         if (_smokeScript is "grenade-away" or "disconnect-fight") aim += MathF.PI;
@@ -314,7 +323,10 @@ public partial class GameClient : Node
             buttons |= _smokeScript is "throw-grenade" or "grenade-away" or "grenade-owner" or "disconnect-fight" or "disconnect-owned-grenade" ? InputButtons.Grenade : InputButtons.PrimaryFire;
             GD.Print($"[GameClient] request script={_smokeScript}; client-tick={tick}; phase={fireTick}; buttons={buttons}; aim={aim}");
         }
-        var move = _smokeScript == "grenade-owner" && fireTick > 0 && fireTick <= 90 ? -NumericsVector2.UnitY : NumericsVector2.Zero;
+        // Keep the owner-immunity setup relative to the observed throw, rather
+        // than walking away before a delayed request reaches the server.
+        var move = _smokeScript == "grenade-owner" && _smokeGrenadeObservedTick is uint observed &&
+            TickMath.Delta(tick, observed) <= 90 ? -NumericsVector2.UnitY : NumericsVector2.Zero;
         return new(tick, move, aim, buttons);
     }
 
@@ -389,6 +401,10 @@ public partial class GameClient : Node
 
     private void ApplySnapshot(StateSnapshot snapshot)
     {
+        if (_smokeTicks.HasValue &&
+            _smokeScript is "throw-grenade" or "grenade-away" or "grenade-owner" &&
+            !_smokeGrenadeObservedTick.HasValue && snapshot.Grenades.Length > 0)
+            _smokeGrenadeObservedTick = _clientTick;
         _lastSnapshot = snapshot;
         _lastSnapshotTick = snapshot.ServerTick;
         _snapshotsApplied++;
