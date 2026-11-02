@@ -8,4 +8,6 @@ public enum MessageType : byte
     Hit = 4,
     DamageDealt = 5,
     Defeat = 6,
+    MatchState = 7,
+    Scoreboard = 8,
 }

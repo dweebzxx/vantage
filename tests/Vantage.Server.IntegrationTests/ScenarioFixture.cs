@@ -66,15 +66,19 @@ internal sealed class Scenario(ScenarioFixture fixture, ITestOutputHelper output
         return process;
     }
 
-    public async Task Boot()
+    public async Task Boot(params string[] serverArguments)
     {
-        Server = Start("server", "server/headless");
+        // P36: Warmup>Playing now resets every player. The default 10 s warmup would land inside scenarios that
+        // run 10 s, so a scenario that does not choose its own timing gets a warmup too long to end.
+        if (!serverArguments.Contains("--match-ticks")) serverArguments = [.. serverArguments, "--match-ticks", "3000,3000,3000"];
+        Server = Start("server", "server/headless", serverArguments);
         await Wait(Server, "listening");
         // Admission is polled only after arena physics registration (P26).
         await Wait(Server, "arena");
     }
 
     public ProcessRunner InvalidPort() => Start("invalid-port", "server/headless", "--port", "abc");
+    public ProcessRunner InvalidMatchTicks(string value) => Start($"invalid-match-ticks-{value}", "server/headless", "--match-ticks", value);
 
     public async Task<ProcessRunner> Client(string name, string script, int ticks)
     {

@@ -1,0 +1,124 @@
+[gd_scene load_steps=3 format=3 uid="uid://d3b4r7c1n5w2e"]
+
+[ext_resource type="Script" path="res://ui/MatchBoard.cs" id="1_mbrd1"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_board"]
+content_margin_left = 24.0
+content_margin_top = 14.0
+content_margin_right = 24.0
+content_margin_bottom = 14.0
+bg_color = Color(0.04, 0.05, 0.07, 0.82)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+
+[node name="MatchBoard" type="CanvasLayer"]
+layer = 2
+script = ExtResource("1_mbrd1")
+
+[node name="Root" type="Control" parent="."]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="Panel" type="PanelContainer" parent="Root"]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_board")
+
+[node name="Column" type="VBoxContainer" parent="Root/Panel"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 4
+
+[node name="ResultLabel" type="Label" parent="Root/Panel/Column"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_colors/font_outline_color = Color(0, 0, 0, 1)
+theme_override_constants/outline_size = 8
+theme_override_font_sizes/font_size = 36
+text = "DRAW"
+horizontal_alignment = 1
+
+[node name="ScoreRow" type="HBoxContainer" parent="Root/Panel/Column"]
+layout_mode = 2
+mouse_filter = 2
+alignment = 1
+
+[node name="BlueScoreLabel" type="Label" parent="Root/Panel/Column/ScoreRow"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_colors/font_color = Color(0.15, 0.65, 0.95, 1)
+theme_override_colors/font_outline_color = Color(0, 0, 0, 1)
+theme_override_constants/outline_size = 8
+theme_override_font_sizes/font_size = 30
+text = "0"
+
+[node name="ColonLabel" type="Label" parent="Root/Panel/Column/ScoreRow"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_colors/font_outline_color = Color(0, 0, 0, 1)
+theme_override_constants/outline_size = 8
+theme_override_font_sizes/font_size = 30
+text = " : "
+
+[node name="RedScoreLabel" type="Label" parent="Root/Panel/Column/ScoreRow"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_colors/font_color = Color(0.95, 0.35, 0.2, 1)
+theme_override_colors/font_outline_color = Color(0, 0, 0, 1)
+theme_override_constants/outline_size = 8
+theme_override_font_sizes/font_size = 30
+text = "0"
+
+[node name="BlueHeader" type="Label" parent="Root/Panel/Column"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_colors/font_color = Color(0.15, 0.65, 0.95, 1)
+theme_override_colors/font_outline_color = Color(0, 0, 0, 1)
+theme_override_constants/outline_size = 6
+theme_override_font_sizes/font_size = 24
+text = "BLUE 0"
+
+[node name="BlueRows" type="VBoxContainer" parent="Root/Panel/Column"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 0
+
+[node name="RedHeader" type="Label" parent="Root/Panel/Column"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_colors/font_color = Color(0.95, 0.35, 0.2, 1)
+theme_override_colors/font_outline_color = Color(0, 0, 0, 1)
+theme_override_constants/outline_size = 6
+theme_override_font_sizes/font_size = 24
+text = "RED 0"
+
+[node name="RedRows" type="VBoxContainer" parent="Root/Panel/Column"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 0
+
+[node name="NextLabel" type="Label" parent="Root/Panel/Column"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_colors/font_outline_color = Color(0, 0, 0, 1)
+theme_override_constants/outline_size = 6
+theme_override_font_sizes/font_size = 22
+text = "Next match in 0:00"
+horizontal_alignment = 1

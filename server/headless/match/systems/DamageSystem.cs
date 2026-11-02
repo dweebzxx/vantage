@@ -5,7 +5,7 @@ namespace Vantage.Server;
 
 public static class DamageSystem
 {
-    public static void Resolve(uint tick, IEnumerable<PendingDamage> damage, List<byte[]> events)
+    public static void Resolve(uint tick, IEnumerable<PendingDamage> damage, List<byte[]> events, MatchHost match, Func<ServerPlayer, Vector2> respawnPosition)
     {
         foreach (var hit in damage)
         {
@@ -18,8 +18,9 @@ public static class DamageSystem
             if (target.Health != 0) continue;
             events.Add(MessageCodec.EncodeDefeat(new(tick, hit.Source, target.EntityId)));
             GD.Print($"[Combat] defeat tick={tick}; source={hit.Source}; target={target.EntityId}");
-            target.Health = CombatRules.DevPlayerMaxHealth;
-            target.Body.GlobalPosition = target.SpawnIndex == 0 ? World.FirstSpawn : World.SecondSpawn;
+            match.RecordKill(tick, hit.Source, hit.Faction, target.EntityId, target.Faction);
+            target.Health =CombatRules.DevPlayerMaxHealth;
+            target.Body.GlobalPosition = respawnPosition(target);
             target.Body.Velocity = Vector2.Zero;
             target.Weapon = WeaponDef.DevHitscan;
             target.FireRemaining = target.GrenadeRemaining = 0;

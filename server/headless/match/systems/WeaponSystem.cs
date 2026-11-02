@@ -16,6 +16,7 @@ public sealed class WeaponSystem
         public float Distance { get; set; }
     }
     private readonly List<Projectile> _projectiles = new();
+    public void Clear() => _projectiles.Clear();
     public ProjectileState[] Capture() => _projectiles.Select(p => new ProjectileState(p.Id, new(p.Position.X, p.Position.Y))).ToArray();
 
     public static void SelectAndAdvanceCooldowns(ServerPlayer player)

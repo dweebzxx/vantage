@@ -47,6 +47,6 @@ public sealed class InputCommandTests
         Assert.Equal(1, (byte)InputButtons.PrimaryFire);
         Assert.Equal(2, (byte)InputButtons.SecondaryFire);
         Assert.Equal(4, (byte)InputButtons.Grenade);
-        Assert.Equal(1, ProtocolConstants.ProtocolVersion);
+        Assert.Equal(2, ProtocolConstants.ProtocolVersion);
     }
 }

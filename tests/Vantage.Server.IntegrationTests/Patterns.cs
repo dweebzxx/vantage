@@ -26,6 +26,17 @@ internal static class Patterns
         ["grenade-created"] = "[Combat] grenade-created ",
         ["grenade-detonated"] = "[Combat] grenade-detonated ",
         ["grenade-target"] = "[Combat] grenade-target ",
+        ["invalid-match-ticks"] = "[Server] error: --match-ticks requires three positive integers separated by commas: warmup,playing,postgame.",
+        ["match-timing"] = "[Match] timing ", ["match-phase"] = "[Match] phase ",
+        ["match-join"] = "[Match] join ", ["match-leave"] = "[Match] leave ",
+        ["match-kill"] = "[Match] kill ", ["team-mismatch"] = "[Match] team-mismatch ",
+        ["match-state"] = "[GameClient] match-state ", ["scoreboard"] = "[GameClient] scoreboard ",
+        ["team-move"] = "[Match] team-move ", ["match-reset"] = "[Match] reset ",
+        ["match-reset-player"] = "[Match] reset-player ",
+        // P37: client match HUD and team tint lines.
+        ["hud"] = "[GameClient] hud ", ["tint"] = "[GameClient] tint ",
+        // P38: client end-of-match result and scoreboard view lines.
+        ["result"] = "[GameClient] result ", ["board"] = "[GameClient] board ",
     };
     private static readonly Regex Fields = new(@"(?:^|; )(?<key>[\w -]+)=(?<value>[^;]*)", RegexOptions.CultureInvariant);
     public static bool Is(string line, string kind) => line.StartsWith(Prefixes[kind], StringComparison.Ordinal);
@@ -48,7 +59,15 @@ internal static class Patterns
         "welcome entity" => "entity",
         "shot tick" or "wall-block tick" or "damage tick" or "defeat tick" or "respawn tick"
             or "projectile-created tick" or "projectile-removed tick" or "grenade-created tick"
-            or "grenade-detonated tick" or "grenade-target tick" => "tick",
+            or "grenade-detonated tick" or "grenade-target tick"
+            or "phase tick" or "kill tick" or "match-state tick" or "scoreboard tick" => "tick",
+        "join entity" or "leave entity" or "team-mismatch entity" => "entity",
+        "timing warmup" => "warmup",
+        "team-move tick" or "reset tick" or "reset-player tick" => "tick",
+        "hud phase" => "phase",
+        "tint entity" => "entity",
+        "result outcome" => "outcome",
+        "board view" => "view",
         _ => key,
     };
 

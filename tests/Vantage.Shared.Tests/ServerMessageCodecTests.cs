@@ -1,5 +1,6 @@
 using System.Numerics;
 using MemoryPack;
+using Vantage.Shared.Game;
 using Vantage.Shared.Protocol;
 using Xunit;
 
@@ -8,7 +9,7 @@ namespace Vantage.Shared.Tests;
 public sealed class ServerMessageCodecTests
 {
     private static StateSnapshot Snapshot() => new(78, 43,
-        [new(1, new(12.5f, -24), 1.5f), new(2, new(-160, 96), -0.5f)], [new(7, new(4, 5))], [new(9, new(-2, 8))]);
+        [new(1, new(12.5f, -24), 1.5f, Faction.DevBlue), new(2, new(-160, 96), -0.5f, Faction.DevRed)], [new(7, new(4, 5))], [new(9, new(-2, 8))]);
 
     [Fact]
     public void Snapshot_envelope_preserves_type_and_every_field()
@@ -20,7 +21,7 @@ public sealed class ServerMessageCodecTests
         Assert.NotNull(actual);
         Assert.Equal(78u, actual!.ServerTick);
         Assert.Equal(43u, actual.AcknowledgedClientTick);
-        Assert.Equal(new PlayerState[] { new(1, new(12.5f, -24), 1.5f), new(2, new(-160, 96), -0.5f) }, actual.Players);
+        Assert.Equal(new PlayerState[] { new(1, new(12.5f, -24), 1.5f, Faction.DevBlue), new(2, new(-160, 96), -0.5f, Faction.DevRed) }, actual.Players);
         Assert.Equal(new ProjectileState[] { new(7, new(4, 5)) }, actual.Projectiles);
         Assert.Equal(new GrenadeState[] { new(9, new(-2, 8)) }, actual.Grenades);
     }

@@ -1,5 +1,6 @@
 using System.Numerics;
 using MemoryPack;
+using Vantage.Shared.Game;
 using Vantage.Shared.Protocol;
 using Xunit;
 
@@ -23,13 +24,14 @@ public sealed class ProtocolSerializationTests
     [Fact]
     public void PlayerState_round_trip_preserves_every_field()
     {
-        PlayerState original = new PlayerState(23u, new Vector2(-10.5f, 40.25f), -2.5f);
+        PlayerState original = new PlayerState(23u, new Vector2(-10.5f, 40.25f), -2.5f, Faction.DevRed);
 
         PlayerState actual = MemoryPackSerializer.Deserialize<PlayerState>(MemoryPackSerializer.Serialize(original));
 
         Assert.Equal(23u, actual.EntityId);
         Assert.Equal(new Vector2(-10.5f, 40.25f), actual.Position);
         Assert.Equal(-2.5f, actual.AimAngleRadians);
+        Assert.Equal(Faction.DevRed, actual.Faction);
     }
 
     [Fact]
@@ -95,7 +97,7 @@ public sealed class ProtocolSerializationTests
     public void StateSnapshot_round_trip_preserves_populated_arrays_and_every_field()
     {
         StateSnapshot original = new(200u, 190u,
-            [new(23u, new(-10.5f, 40.25f), -2.5f), new(24u, new(50.0f, -7.0f), 0.5f)],
+            [new(23u, new(-10.5f, 40.25f), -2.5f, Faction.DevBlue), new(24u, new(50.0f, -7.0f), 0.5f, Faction.DevRed)],
             [new(31u, new(12.5f, -8.25f)), new(32u, new(6.0f, 7.0f))],
             [new(41u, new(-3.5f, 9.25f)), new(42u, new(8.0f, 9.0f))]);
 
@@ -104,7 +106,7 @@ public sealed class ProtocolSerializationTests
         Assert.NotNull(actual);
         Assert.Equal(200u, actual.ServerTick);
         Assert.Equal(190u, actual.AcknowledgedClientTick);
-        Assert.Equal(new PlayerState[] { new(23u, new(-10.5f, 40.25f), -2.5f), new(24u, new(50.0f, -7.0f), 0.5f) }, actual.Players);
+        Assert.Equal(new PlayerState[] { new(23u, new(-10.5f, 40.25f), -2.5f, Faction.DevBlue), new(24u, new(50.0f, -7.0f), 0.5f, Faction.DevRed) }, actual.Players);
         Assert.Equal(new ProjectileState[] { new(31u, new(12.5f, -8.25f)), new(32u, new(6.0f, 7.0f)) }, actual.Projectiles);
         Assert.Equal(new GrenadeState[] { new(41u, new(-3.5f, 9.25f)), new(42u, new(8.0f, 9.0f)) }, actual.Grenades);
     }

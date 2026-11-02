@@ -16,6 +16,7 @@ public sealed class GrenadeSystem
         public uint ThrownTick { get; } = tick;
     }
     private readonly List<Grenade> _grenades = new();
+    public void Clear() => _grenades.Clear();
     public GrenadeState[] Capture() => _grenades.Select(g => new GrenadeState(g.Id, new(g.Position.X, g.Position.Y))).ToArray();
 
     public void Throw(uint tick, ServerPlayer player, float aim, Func<uint> allocate)

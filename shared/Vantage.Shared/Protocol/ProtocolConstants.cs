@@ -2,5 +2,5 @@ namespace Vantage.Shared.Protocol;
 
 public static class ProtocolConstants
 {
-    public const int ProtocolVersion = 1;
+    public const int ProtocolVersion = 2;
 }

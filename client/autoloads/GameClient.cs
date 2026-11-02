@@ -13,6 +13,7 @@ public partial class GameClient : Node
     private static readonly StringName MoveDown = "move_down";
     private static readonly StringName PrimaryFire = "primary_fire";
     private static readonly StringName GrenadeThrow = "grenade_throw";
+    private static readonly StringName ScoreboardAction = "scoreboard";
 
     private ENetMultiplayerPeer? _peer;
     private PlayerController? _player;
@@ -37,6 +38,17 @@ public partial class GameClient : Node
     private readonly Dictionary<uint, Node2D> _remotePlayers = new();
     private PackedScene? _remoteScene;
     private PlayerCombatController? _combat;
+    // P37: read-only copies of the newest server match messages, plus what the HUD and tint need to display them.
+    // The client decides no phase, score, team, or winner; it only shows these.
+    private MatchStateMessage? _matchState;
+    private ScoreboardMessage? _scoreboard;
+    private Faction? _ownFaction;
+    private MatchHud? _matchHud;
+    private PackedScene? _matchHudScene;
+    // P38: scoreboard (held key) and end-of-match screen (Postgame). Created on the welcome, freed on disconnect.
+    private MatchBoard? _matchBoard;
+    private PackedScene? _matchBoardScene;
+    private readonly Dictionary<uint, (Polygon2D Body, Color Original, Faction Team)> _tints = new();
     private readonly Dictionary<uint, Node2D> _projectileViews = new();
     private readonly Dictionary<uint, Node2D> _grenadeViews = new();
     private readonly Dictionary<uint, (double Remaining, bool Defeat)> _flashes = new();
@@ -121,6 +133,11 @@ public partial class GameClient : Node
             {
                 BeginDisconnect(false);
             }
+        }
+        // Tab must not move the GUI focus while the board exists (connected play only).
+        else if (IsInstanceValid(_matchBoard) && @event.IsAction(ScoreboardAction))
+        {
+            GetViewport().SetInputAsHandled();
         }
     }
 
@@ -372,6 +389,8 @@ public partial class GameClient : Node
                 _entityId = welcome.EntityId;
                 if (_player is not null) _player.ViewOnly = true;
                 GD.Print($"[GameClient] welcome entity={_entityId}; protocol={welcome.ProtocolVersion}");
+                ShowMatchHud();
+                ShowMatchBoard();
             }
             else if (MessageCodec.TryDecodeHit(packet, out HitEvent hit))
                 LogEvent("hit", hit.ServerTick, hit.SourceEntityId, hit.TargetEntityId, null);
@@ -385,6 +404,19 @@ public partial class GameClient : Node
                 LogEvent("defeat", defeat.ServerTick, defeat.SourceEntityId, defeat.TargetEntityId, null);
                 Flash(defeat.TargetEntityId, true);
                 if (defeat.TargetEntityId != _entityId) _sawDefeat = true;
+            }
+            else if (MessageCodec.TryDecodeMatchState(packet, out MatchStateMessage matchState))
+            {
+                GD.Print($"[GameClient] match-state tick={matchState.ServerTick}; phase={matchState.Phase}; end-tick={matchState.PhaseEndTick}; blue={matchState.BlueScore}; red={matchState.RedScore}");
+                // Equal ticks are accepted; only an older message is stale.
+                if (_matchState is not MatchStateMessage current || TickMath.Delta(matchState.ServerTick, current.ServerTick) >= 0)
+                    _matchState = matchState;
+            }
+            else if (MessageCodec.TryDecodeScoreboard(packet, out ScoreboardMessage? scoreboard))
+            {
+                GD.Print($"[GameClient] scoreboard tick={scoreboard!.ServerTick}; rows={string.Join(",", scoreboard.Rows.Select(r => $"{r.EntityId}:{r.Faction}:{r.Kills}:{r.Deaths}"))}");
+                if (_scoreboard is null || TickMath.Delta(scoreboard.ServerTick, _scoreboard.ServerTick) >= 0)
+                    _scoreboard = scoreboard;
             }
             else if (MessageCodec.TryDecodeSnapshot(packet, out StateSnapshot? snapshot))
             {
@@ -415,6 +447,8 @@ public partial class GameClient : Node
             if (player.EntityId == _entityId)
             {
                 _player?.ApplySnapshot(position, player.AimAngleRadians);
+                _ownFaction = player.Faction;
+                if (_player is not null) ApplyTint(player.EntityId, _player, player.Faction);
                 continue;
             }
             present.Add(player.EntityId);
@@ -428,11 +462,13 @@ public partial class GameClient : Node
             }
             view.GlobalPosition = position;
             view.GetNode<Node2D>("DevDebugAimPivot").Rotation = player.AimAngleRadians;
+            ApplyTint(player.EntityId, view, player.Faction);
         }
         foreach (uint id in _remotePlayers.Keys.Where(id => !present.Contains(id)).ToArray())
         {
             if (IsInstanceValid(_remotePlayers[id])) _remotePlayers[id].QueueFree();
             _remotePlayers.Remove(id);
+            _tints.Remove(id);
         }
         _mostOthersSeen = Math.Max(_mostOthersSeen, present.Count);
         UpdateAttackViews(_projectileViews, snapshot.Projectiles.Select(p => (p.EntityId, p.Position)), "NetworkProjectile");
@@ -448,6 +484,56 @@ public partial class GameClient : Node
             foreach (var p in snapshot.Players) GD.Print($"[GameClient] after-defeat snapshot tick={snapshot.ServerTick}; entity={p.EntityId}; position={p.Position}");
             _loggedRespawnSnapshot = true;
         }
+    }
+
+    // P37: set the body polygon's Color from the faction the server sent. Never Modulate, which the damage and
+    // defeat flashes use. Faction.None keeps (or returns to) the scene's own color, read from the node the first
+    // time it is tinted.
+    private void ApplyTint(uint id, Node2D view, Faction faction)
+    {
+        var body = view.GetNodeOrNull<Polygon2D>("DevPlaceholderBody");
+        if (body is null) return;
+        if (!_tints.TryGetValue(id, out var entry) || !ReferenceEquals(entry.Body, body))
+            entry = (body, body.Color, Faction.None);
+        if (entry.Team != faction)
+        {
+            body.Color = TeamColors.TryGet(faction, out Color color) ? color : entry.Original;
+            GD.Print($"[GameClient] tint entity={id}; team={faction}");
+        }
+        _tints[id] = (body, entry.Original, faction);
+    }
+
+    private void ShowMatchHud()
+    {
+        if (IsInstanceValid(_matchHud)) return;
+        _matchHudScene ??= GD.Load<PackedScene>("res://ui/MatchHud.tscn");
+        _matchHud = _matchHudScene.Instantiate<MatchHud>();
+        AddChild(_matchHud);
+    }
+
+    private void ShowMatchBoard()
+    {
+        if (IsInstanceValid(_matchBoard)) return;
+        _matchBoardScene ??= GD.Load<PackedScene>("res://ui/MatchBoard.tscn");
+        _matchBoard = _matchBoardScene.Instantiate<MatchBoard>();
+        AddChild(_matchBoard);
+    }
+
+    // The newest server tick the client knows: the later (wrap-safe) of the last applied snapshot and the
+    // last match-state message.
+    private uint NewestServerTick()
+    {
+        if (_lastSnapshotTick is uint snapshotTick && _matchState is MatchStateMessage state)
+            return TickMath.IsNewerThan(state.ServerTick, snapshotTick) ? state.ServerTick : snapshotTick;
+        return _lastSnapshotTick ?? _matchState?.ServerTick ?? 0u;
+    }
+
+    public override void _Process(double delta)
+    {
+        if (IsInstanceValid(_matchHud)) _matchHud!.Refresh(_matchState, NewestServerTick(), _ownFaction);
+        // The scoreboard key is read here only to show the panel; it is never part of the input sent to the server.
+        if (IsInstanceValid(_matchBoard))
+            _matchBoard!.Refresh(_matchState, _scoreboard, NewestServerTick(), _entityId, Input.IsActionPressed(ScoreboardAction));
     }
 
     private static void LogEvent(string type, uint tick, uint source, uint target, int? amount) =>
@@ -569,6 +655,22 @@ public partial class GameClient : Node
         foreach (Node2D view in _remotePlayers.Values)
             if (IsInstanceValid(view)) view.QueueFree();
         _remotePlayers.Clear();
+        // P37: put every tinted body back to the color it had before the first tint, drop the stored match
+        // messages, and remove the match HUD so offline play is exactly as before.
+        foreach (var tint in _tints.Values)
+            if (IsInstanceValid(tint.Body)) tint.Body.Color = tint.Original;
+        _tints.Clear();
+        _matchState = null;
+        _scoreboard = null;
+        _ownFaction = null;
+        if (IsInstanceValid(_matchHud)) _matchHud!.QueueFree();
+        _matchHud = null;
+        if (IsInstanceValid(_matchBoard))
+        {
+            _matchBoard!.Clear();
+            _matchBoard.QueueFree();
+        }
+        _matchBoard = null;
         _entityId = null;
         _lastSnapshotTick = null;
         _lastSnapshot = null;

@@ -48,9 +48,31 @@ public static class MessageCodec
     public static bool TryDecodeSnapshot(ReadOnlySpan<byte> packet, out StateSnapshot? snapshot)
     {
         if (TryDecode(packet, MessageType.Snapshot, out snapshot) && snapshot is not null &&
-            snapshot.Players is not null && snapshot.Projectiles is not null && snapshot.Grenades is not null)
+            snapshot.Players is not null && snapshot.Projectiles is not null && snapshot.Grenades is not null &&
+            snapshot.Players.All(p => Enum.IsDefined(p.Faction)))
             return true;
         snapshot = null;
+        return false;
+    }
+
+    public static byte[] EncodeMatchState(MatchStateMessage value) => Encode(MessageType.MatchState, value);
+    public static byte[] EncodeScoreboard(ScoreboardMessage value) => Encode(MessageType.Scoreboard, value);
+
+    public static bool TryDecodeMatchState(ReadOnlySpan<byte> packet, out MatchStateMessage value)
+    {
+        if (TryDecode(packet, MessageType.MatchState, out value) &&
+            Enum.IsDefined(value.Phase) && value.BlueScore >= 0 && value.RedScore >= 0)
+            return true;
+        value = default;
+        return false;
+    }
+
+    public static bool TryDecodeScoreboard(ReadOnlySpan<byte> packet, out ScoreboardMessage? value)
+    {
+        if (TryDecode(packet, MessageType.Scoreboard, out value) && value is not null && value.Rows is not null &&
+            value.Rows.All(r => Enum.IsDefined(r.Faction) && r.Kills >= 0 && r.Deaths >= 0))
+            return true;
+        value = null;
         return false;
     }
 
