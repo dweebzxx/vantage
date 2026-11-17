@@ -80,9 +80,10 @@ internal sealed class Scenario(ScenarioFixture fixture, ITestOutputHelper output
     public ProcessRunner InvalidPort() => Start("invalid-port", "server/headless", "--port", "abc");
     public ProcessRunner InvalidMatchTicks(string value) => Start($"invalid-match-ticks-{value}", "server/headless", "--match-ticks", value);
 
-    public async Task<ProcessRunner> Client(string name, string script, int ticks)
+    // extra: further smoke options for the scripted client, e.g. "--net-target", "teammate" (P39).
+    public async Task<ProcessRunner> Client(string name, string script, int ticks, params string[] extra)
     {
-        var process = Start(name, "client", "--connect", "--net-smoke", ticks.ToString(System.Globalization.CultureInfo.InvariantCulture), "--net-script", script);
+        var process = Start(name, "client", ["--connect", "--net-smoke", ticks.ToString(System.Globalization.CultureInfo.InvariantCulture), "--net-script", script, .. extra]);
         await Wait(process, "welcome");
         return process;
     }

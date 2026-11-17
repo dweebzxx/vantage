@@ -702,4 +702,389 @@ public sealed class ServerScenarios(ScenarioFixture fixture, ITestOutputHelper o
             Assert.Equal(fromMessage, shown.Text("rows"));
         }
     });
+
+    // P39. M5 closing scenarios. Spawn geometry they rely on (World.cs spawns, ArenaProbe wall faces): the
+    // straight lines spawn 0 to spawn 1, spawn 0 to spawn 2 and spawn 2 to spawn 3 cross no wall and no other
+    // spawn; every scripted player except the "east" one stands still on its spawn.
+    private static Vector2 JoinedAt(Scenario s, long entity) =>
+        Assert.Single(Patterns.Read(s.Server, "joined"), p => p.Number("entity") == entity).Position;
+
+    private static float AimFrom(Vector2 from, Vector2 to) => MathF.Atan2(to.Y - from.Y, to.X - from.X);
+
+    private static bool SameAim(float a, float b) => MathF.Abs(MathF.IEEERemainder(a - b, 2 * MathF.PI)) < 0.01f;
+
+    [Fact, Trait("Scenario", "FriendlyFireShots")]
+    public Task Friendly_fire_shots_and_projectiles_never_damage_a_teammate_but_the_same_gun_damages_an_enemy() => Run(async s =>
+    {
+        // The shooter (first join, Blue) starts its script only when it sees a teammate and an enemy. It then
+        // needs 90 + 7 * 45 = 405 inputs for two instant shots and two projectiles at the teammate and four
+        // instant shots at the enemy. Assumption: the two other clients join within about 5 s of the shooter,
+        // so its 1000 inputs cover that, and the others (900 inputs each) outlast the shooter's last shot.
+        await s.Boot(ShortMatch);
+        var shooter = await s.Client("shooter", "ff-fire", 1000);
+        var enemy = await s.Client("enemy", "idle", 900);
+        var mate = await s.Client("teammate", "idle", 900);
+        await s.Server.WaitFor(line => Patterns.Is(line, "defeat"), "defeat", TimeSpan.FromSeconds(30));
+        foreach (var client in new[] { shooter, enemy, mate }) await s.Finish(client);
+        await s.StopServer();
+
+        var joins = Patterns.Read(s.Server, "match-join");
+        Assert.Equal(["DevBlue", "DevRed", "DevBlue"], joins.Select(j => j.Text("team")).ToArray());
+        long shooterId = joins[0].Number("entity"), enemyId = joins[1].Number("entity"), mateId = joins[2].Number("entity");
+        float mateAim = AimFrom(JoinedAt(s, shooterId), JoinedAt(s, mateId));
+        float enemyAim = AimFrom(JoinedAt(s, shooterId), JoinedAt(s, enemyId));
+
+        var shots = Patterns.Read(s.Server, "shot");
+        Assert.All(shots, shot => Assert.Equal(shooterId, shot.Number("shooter")));
+        var atMate = shots.Where(shot => SameAim(shot.Float("aim"), mateAim)).ToArray();
+        var atEnemy = shots.Where(shot => SameAim(shot.Float("aim"), enemyAim)).ToArray();
+        Assert.Equal(shots.Length, atMate.Length + atEnemy.Length);
+        // At least one of each kind reached the server (two are sent; an input can be lost).
+        Assert.Contains(atMate, shot => shot.Text("weapon") == "DevHitscan");
+        var projectileShots = atMate.Where(shot => shot.Text("weapon") == "DevProjectile").ToArray();
+        Assert.NotEmpty(projectileShots);
+        Assert.All(atEnemy, shot => Assert.Equal("DevHitscan", shot.Text("weapon")));
+        // No shot was stopped by a wall, so every instant shot reached a player's body.
+        Assert.Empty(Patterns.Read(s.Server, "wall"));
+        // Every projectile flew into the teammate and was removed there.
+        var removed = Patterns.Read(s.Server, "projectile-removed");
+        Assert.Equal(projectileShots.Length, removed.Length);
+        Assert.All(removed, p => Assert.Equal((shooterId, "player"), (p.Number("owner"), p.Text("reason"))));
+
+        // The only damage is the enemy's: four 25-damage hits, each on the tick of a shot aimed at the enemy.
+        var damage = Patterns.Read(s.Server, "damage");
+        Assert.Equal(4, damage.Length);
+        Assert.All(damage, d => Assert.Equal((shooterId, enemyId, 25L), (d.Number("source"), d.Number("target"), d.Number("amount"))));
+        Assert.All(damage, d => Assert.Contains(atEnemy, shot => shot.Number("tick") == d.Number("tick")));
+        Assert.All(atMate, shot => Assert.DoesNotContain(damage, d => d.Number("tick") == shot.Number("tick")));
+        Assert.True(atMate.Max(shot => shot.Index) < damage[0].Index, "the teammate shots come before the first enemy hit");
+        Assert.Equal(enemyId, One(s.Server, "defeat").Number("target"));
+        var kill = One(s.Server, "match-kill");
+        Assert.Equal(("true", 1L, 0L), (kill.Text("scored"), kill.Number("blue"), kill.Number("red")));
+        foreach (var client in new[] { shooter, enemy, mate })
+        {
+            Assert.All(Patterns.Read(client, "event"), e => Assert.Equal(enemyId, e.Number("target")));
+            var rows = Rows(Patterns.Read(client, "scoreboard").Last(b => Rows(b).Length == 3));
+            Assert.Equal([(shooterId, "DevBlue", 1L, 0L), (enemyId, "DevRed", 0L, 1L), (mateId, "DevBlue", 0L, 0L)], rows);
+        }
+    });
+
+    [Fact, Trait("Scenario", "FriendlyFireGrenade")]
+    public Task Friendly_fire_grenade_blast_does_not_damage_a_teammate_inside_the_radius() => Run(async s =>
+    {
+        // The fourth joiner (Red, spawn 3) throws at its teammate on spawn 1, 160 units away. The grenade lands
+        // 248 units from the thrower, so 88 units from the teammate, inside the 96-unit radius.
+        // Assumption: the thrower's 420 inputs cover 90 aim ticks, the throw and the 90-tick fuse; the three
+        // idle clients (1000, 900 and 800 inputs) outlast it because each joins within a few seconds.
+        await s.Boot();
+        var blueFirst = await s.Client("blue-first", "idle", 1000);
+        var redMate = await s.Client("red-teammate", "idle", 900);
+        var blueSecond = await s.Client("blue-second", "idle", 800);
+        var thrower = await s.Client("red-thrower", "throw-grenade", 420, "--net-target", "teammate", "--net-wait-players", "4");
+        foreach (var client in new[] { thrower, blueSecond, redMate, blueFirst }) await s.Finish(client);
+        await s.StopServer();
+
+        var joins = Patterns.Read(s.Server, "match-join");
+        Assert.Equal(["DevBlue", "DevRed", "DevBlue", "DevRed"], joins.Select(j => j.Text("team")).ToArray());
+        long mateId = joins[1].Number("entity"), throwerId = joins[3].Number("entity");
+        var created = One(s.Server, "grenade-created");
+        Assert.Equal(throwerId, created.Number("owner"));
+        var detonated = One(s.Server, "grenade-detonated");
+        var targets = Patterns.Read(s.Server, "grenade-target");
+        Assert.Equal(4, targets.Length);
+        var mate = Assert.Single(targets, t => t.Number("target") == mateId);
+        // The teammate is close enough that an enemy standing there would be damaged...
+        Assert.InRange(mate.Float("distance"), 0f, GrenadeDef.DevPlaceholder.RadiusUnits);
+        Assert.True(DamageMath.RadiusDamage(GrenadeDef.DevPlaceholder, mate.Float("distance")) > 0);
+        Assert.InRange(Vector2.Distance(detonated.Position, JoinedAt(s, mateId)), mate.Float("distance") - 0.5f, mate.Float("distance") + 0.5f);
+        // ...and the server still gives it nothing.
+        Assert.Equal(("False", 0L), (mate.Text("eligible"), mate.Number("amount")));
+        foreach (var target in targets.Where(t => t.Number("target") != mateId && t.Number("target") != throwerId))
+        {
+            // The two Blue players may be damaged by rule; here they stand outside the radius.
+            Assert.Equal("True", target.Text("eligible"));
+            Assert.Equal(DamageMath.RadiusDamage(GrenadeDef.DevPlaceholder, target.Float("distance")), target.Number("amount"));
+        }
+        Assert.Empty(Patterns.Read(s.Server, "damage"));
+        Assert.Empty(Patterns.Read(s.Server, "defeat"));
+        foreach (var client in new[] { thrower, blueSecond, redMate, blueFirst }) Assert.Empty(Patterns.Read(client, "event"));
+    });
+
+    [Fact, Trait("Scenario", "RespawnSkipsOccupied")]
+    public Task Respawn_skips_the_team_spawn_a_teammate_stands_on() => Run(async s =>
+    {
+        // The third joiner (Blue, spawn 2) shoots the fourth (Red, spawn 3). Red's first spawn (1) is held by
+        // the second joiner, so the defeated player must come back on spawn 3.
+        // Assumption: the fourth client joins within about 5 s of the third, so the shooter's 900 inputs cover
+        // the 90 aim ticks and four shots (150 ticks) after it; every other client is still connected then.
+        await s.Boot();
+        var blueFirst = await s.Client("blue-first", "idle", 1100);
+        var redFirst = await s.Client("red-first", "idle", 1000);
+        var shooter = await s.Client("blue-shooter", "fire-hitscan", 900, "--net-target", "last-enemy", "--net-wait-players", "4");
+        var victim = await s.Client("red-victim", "idle", 700);
+        foreach (var client in new[] { victim, shooter, redFirst, blueFirst }) await s.Finish(client);
+        await s.StopServer();
+
+        var spawns = ArenaSpawns(s);
+        var joined = Patterns.Read(s.Server, "joined");
+        Assert.Equal([0L, 1L, 2L, 3L], joined.Select(j => j.Number("spawn")).ToArray());
+        long redFirstId = joined[1].Number("entity"), shooterId = joined[2].Number("entity"), victimId = joined[3].Number("entity");
+        var defeat = One(s.Server, "defeat");
+        Assert.Equal((shooterId, victimId), (defeat.Number("source"), defeat.Number("target")));
+        Assert.All(Patterns.Read(s.Server, "damage"), d => Assert.Equal(victimId, d.Number("target")));
+        var respawn = One(s.Server, "respawn");
+        Assert.Equal(victimId, respawn.Number("entity"));
+        // Oracle: the shared spawn rule over Red's spawn list and where the other three players stand.
+        var others = joined.Where(j => j.Number("entity") != victimId).Select(j => j.Position).ToArray();
+        Assert.Equal(1, SpawnRules.ChooseSpawn([spawns[1], spawns[3]], others));
+        Assert.Equal(spawns[1], JoinedAt(s, redFirstId));
+        Assert.Equal(spawns[3], respawn.Position);
+        Assert.All(others, other => Assert.False(Overlap(other, respawn.Position)));
+    });
+
+    [Fact, Trait("Scenario", "TenKills")]
+    public Task Ten_kills_add_up_in_team_scores_and_scoreboard_rows() => Run(async s =>
+    {
+        // Both clients shoot each other through respawns: the first (Blue) until it has 6 kills, the second
+        // (Red) until it has 4. A kill takes four shots 20 ticks apart, so 6 kills need about 90 + 6 * 80 = 570
+        // ticks after the second join. Assumption: the second client joins within about 5 s, so 1200 and 1240
+        // inputs leave room for lost inputs. Playing starts 30 ticks after the first join, before any shot.
+        await s.Boot(ShortMatch);
+        var blue = await s.Client("blue", "fire-until", 1200, "--net-kills", "6");
+        var red = await s.Client("red", "fire-until", 1240, "--net-kills", "4");
+        await s.Finish(blue);
+        await s.Finish(red);
+        await s.StopServer();
+        Counters(s, blue);
+        Counters(s, red);
+
+        var joins = Patterns.Read(s.Server, "match-join");
+        Assert.Equal(["DevBlue", "DevRed"], joins.Select(j => j.Text("team")).ToArray());
+        long blueId = joins[0].Number("entity"), redId = joins[1].Number("entity");
+        var kills = Patterns.Read(s.Server, "match-kill");
+        Assert.Equal(10, kills.Length);
+        Assert.All(kills, k => Assert.Equal(("true", "Playing"), (k.Text("scored"), k.Text("phase"))));
+        Assert.Equal(10, Patterns.Read(s.Server, "defeat").Length);
+        for (int i = 0; i < kills.Length; i++)
+        {
+            // After every kill the two team scores are exactly the kills so far, split by the killer's team.
+            Assert.Equal((long)kills.Take(i + 1).Count(k => k.Number("killer") == blueId), kills[i].Number("blue"));
+            Assert.Equal((long)kills.Take(i + 1).Count(k => k.Number("killer") == redId), kills[i].Number("red"));
+        }
+        Assert.Equal((6L, 4L), (kills[^1].Number("blue"), kills[^1].Number("red")));
+        Assert.Equal(6, kills.Count(k => k.Number("killer") == blueId && k.Number("victim") == redId));
+        Assert.Equal(4, kills.Count(k => k.Number("killer") == redId && k.Number("victim") == blueId));
+        foreach (var client in new[] { blue, red })
+        {
+            var rows = Rows(Patterns.Read(client, "scoreboard").Last(b => Rows(b).Length == 2));
+            Assert.Equal([(blueId, "DevBlue", 6L, 4L), (redId, "DevRed", 4L, 6L)], rows);
+            var state = Patterns.Read(client, "match-state").Last();
+            Assert.Equal(("Playing", 6L, 4L), (state.Text("phase"), state.Number("blue"), state.Number("red")));
+            var hud = Patterns.Read(client, "hud").Last();
+            Assert.Equal((6L, 4L), (hud.Number("blue"), hud.Number("red")));
+            // The totals a client was told never go down and end at ten (two kills on one tick share a message).
+            long[] totals = Patterns.Read(client, "match-state").Select(st => st.Number("blue") + st.Number("red")).ToArray();
+            Assert.Equal(totals.Order().ToArray(), totals);
+            Assert.Equal(10, totals[^1]);
+        }
+    });
+
+    [Fact, Trait("Scenario", "MatchKillInPostgame")]
+    public Task Match_kill_during_postgame_does_not_score() => Run(async s =>
+    {
+        // Postgame starts 60 ticks after the first join. The shooter's first shot comes 90 ticks after it sees
+        // the target at the earliest, so the kill always lands in the 3000-tick Postgame.
+        var (shooter, target) = await Fight(s, "fire-hitscan", serverArgs: ["--match-ticks", "30,30,3000"]);
+        Assert.Single(Patterns.Read(s.Server, "defeat"));
+        var kill = One(s.Server, "match-kill");
+        Assert.Equal(("false", "Postgame", 0L, 0L), (kill.Text("scored"), kill.Text("phase"), kill.Number("blue"), kill.Number("red")));
+        foreach (var client in new[] { shooter, target })
+        {
+            Assert.All(Patterns.Read(client, "scoreboard"), b => Assert.All(Rows(b), r => Assert.Equal((0L, 0L), (r.Kills, r.Deaths))));
+            Assert.All(Patterns.Read(client, "match-state"), st => Assert.Equal((0L, 0L), (st.Number("blue"), st.Number("red"))));
+            Assert.Equal(("Draw", 0L, 0L), (One(client, "result").Text("outcome"), One(client, "result").Number("blue"), One(client, "result").Number("red")));
+        }
+    });
+
+    [Fact, Trait("Scenario", "FullMatch")]
+    public Task Full_match_ends_and_the_next_match_starts_from_zero() => Run(async s =>
+    {
+        // Warmup 30, Playing 360, Postgame 120 ticks: the second match's Warmup starts 510 ticks (8.5 s) and
+        // its Playing 540 ticks after the first join. Timing assumption as in ResultWinner for the kill (in the
+        // first Playing); both clients (900 and 940 inputs) stay connected past tick 540.
+        var (shooter, target) = await Fight(s, "fire-hitscan", ticks: 900, serverArgs: ["--match-ticks", "30,360,120"]);
+        var phases = Patterns.Read(s.Server, "match-phase");
+        Assert.Equal(["Idle>Warmup", "Warmup>Playing", "Playing>Postgame", "Postgame>Warmup", "Warmup>Playing"],
+            phases.Take(5).Select(p => $"{p.Text("from")}>{p.Text("to")}").ToArray());
+        var kill = One(s.Server, "match-kill");
+        Assert.Equal(("true", "Playing"), (kill.Text("scored"), kill.Text("phase")));
+        Assert.InRange(kill.Number("tick"), phases[1].Number("tick"), phases[2].Number("tick") - 1);
+        Assert.Equal(1, kill.Number("blue") + kill.Number("red"));
+        // The match ends with the kill's score, and the next match starts at 0-0 on the exact tick.
+        Assert.Equal((kill.Number("blue"), kill.Number("red")), (phases[2].Number("blue"), phases[2].Number("red")));
+        Assert.Equal((0L, 0L), (phases[3].Number("blue"), phases[3].Number("red")));
+        Assert.Equal(120, phases[3].Number("tick") - phases[2].Number("tick"));
+        long next = phases[3].Number("tick");
+        var resets = Patterns.Read(s.Server, "match-reset");
+        Assert.Contains(resets, r => (r.Number("tick"), r.Text("from"), r.Text("to"), r.Number("players")) == (next, "Postgame", "Warmup", 2L));
+        Assert.Contains(resets, r => (r.Number("tick"), r.Text("from"), r.Text("to")) == (phases[4].Number("tick"), "Warmup", "Playing"));
+        Assert.Empty(Patterns.Read(s.Server, "team-move"));
+        Assert.Empty(Patterns.Read(s.Server, "team-mismatch"));
+        string winner = TeamOfEntity(s, kill.Number("killer")) == "DevBlue" ? "BlueWins" : "RedWins";
+        foreach (var client in new[] { shooter, target })
+        {
+            var state = Assert.Single(Patterns.Read(client, "match-state"), st => st.Number("tick") == next);
+            // The first match's result. A client still connected 900 ticks after the first join also sees the
+            // second match end, which this scenario does not judge.
+            var result = Assert.Single(Patterns.Read(client, "result"), r => r.Index < state.Index);
+            Assert.Equal((winner, kill.Number("blue"), kill.Number("red")), (result.Text("outcome"), result.Number("blue"), result.Number("red")));
+            Assert.Equal(("Warmup", 0L, 0L), (state.Text("phase"), state.Number("blue"), state.Number("red")));
+            var board = Assert.Single(Patterns.Read(client, "scoreboard"), b => b.Number("tick") == next);
+            Assert.Equal(2, Rows(board).Length);
+            Assert.All(Rows(board), r => Assert.Equal((0L, 0L), (r.Kills, r.Deaths)));
+            // The end-of-match screen goes away and the HUD shows the new match from zero.
+            Assert.Contains(Patterns.Read(client, "board"), b => b.Text("view") == "hidden" && b.Index > state.Index);
+            var huds = Patterns.Read(client, "hud").Where(h => h.Index > state.Index).ToArray();
+            Assert.Contains(huds, h => h.Text("phase") == "Warmup");
+            Assert.Contains(huds, h => h.Text("phase") == "Playing");
+            Assert.All(huds, h => Assert.Equal((0L, 0L), (h.Number("blue"), h.Number("red"))));
+        }
+    });
+
+    [Fact, Trait("Scenario", "LateJoin")]
+    public Task Late_joiner_receives_the_current_phase_scores_and_rows() => Run(async s =>
+    {
+        // The third client is started only after the server has logged the kill, so it always joins a match
+        // that already has a score. The first two clients (1500 inputs, 25 s) outlast its 180 inputs.
+        // Assumption: the kill and the third client's start-up fit inside those 25 s.
+        await s.Boot(ShortMatch);
+        var shooter = await s.Client("shooter", "fire-hitscan", 1500);
+        var target = await s.Client("target", "idle", 1500);
+        await s.Server.WaitFor(line => Patterns.Is(line, "match-kill"), "match-kill", TimeSpan.FromSeconds(30));
+        var late = await s.Client("late", "idle", 180);
+        await s.Finish(late);
+        await s.Finish(shooter);
+        await s.Finish(target);
+        await s.StopServer();
+
+        var kill = One(s.Server, "match-kill");
+        Assert.Equal(("true", "Playing", 1L, 0L), (kill.Text("scored"), kill.Text("phase"), kill.Number("blue"), kill.Number("red")));
+        var joins = Patterns.Read(s.Server, "match-join");
+        Assert.True(joins[2].Index > kill.Index, "the late client must join after the kill");
+        // One Blue and one Red: the tie goes to Blue, and Blue's first spawn is taken by the shooter.
+        Assert.Equal("DevBlue", joins[2].Text("team"));
+        long lateId = joins[2].Number("entity");
+        Assert.Equal(2, Assert.Single(Patterns.Read(s.Server, "joined"), j => j.Number("entity") == lateId).Number("spawn"));
+        var playing = Assert.Single(Patterns.Read(s.Server, "match-phase"), p => p.Text("to") == "Playing");
+
+        var first = Patterns.Read(late, "match-state")[0];
+        Assert.Equal(("Playing", 1L, 0L, playing.Number("end-tick")),
+            (first.Text("phase"), first.Number("blue"), first.Number("red"), first.Number("end-tick")));
+        Assert.True(One(late, "welcome").Index < first.Index);
+        var rows = Rows(Patterns.Read(late, "scoreboard")[0]);
+        Assert.Equal([(kill.Number("killer"), "DevBlue", 1L, 0L), (kill.Number("victim"), "DevRed", 0L, 1L), (lateId, "DevBlue", 0L, 0L)], rows);
+        var hud = Patterns.Read(late, "hud").Last();
+        Assert.Equal(("Playing", 1L, 0L, "DevBlue"), (hud.Text("phase"), hud.Number("blue"), hud.Number("red"), hud.Text("team")));
+        // The clients already connected get the new row too.
+        foreach (var client in new[] { shooter, target })
+            Assert.Contains(Patterns.Read(client, "scoreboard"), b => Rows(b).SequenceEqual(rows));
+    });
+
+    [Fact, Trait("Scenario", "ResetClearsAttacks")]
+    public Task Reset_removes_flying_attacks_and_clears_the_grenade_cooldown() => Run(async s =>
+    {
+        // One client, Warmup 240 ticks. The script reads the server's own phase end tick, so the throw and the
+        // shot are placed relative to the reset and need no wall-clock assumption.
+        await s.Boot("--match-ticks", "240,3000,30");
+        var client = await s.Client("client", "reset-clear", 540);
+        await s.Finish(client);
+        await s.StopServer();
+
+        var reset = One(s.Server, "match-reset");
+        Assert.Equal(("Warmup", "Playing"), (reset.Text("from"), reset.Text("to")));
+        long at = reset.Number("tick");
+        long fuse = CombatRules.CooldownTicks(GrenadeDef.DevPlaceholder.FuseSeconds);
+        var grenades = Patterns.Read(s.Server, "grenade-created");
+        Assert.Equal(2, grenades.Length);
+        // The first grenade was thrown less than one fuse before the reset and never explodes.
+        Assert.InRange(grenades[0].Number("tick"), at - fuse + 1, at - 1);
+        var detonated = One(s.Server, "grenade-detonated");
+        Assert.Equal(grenades[1].Number("entity"), detonated.Number("entity"));
+        // The grenade cooldown equals the fuse. A second throw sooner than that proves the reset cleared it.
+        Assert.InRange(grenades[1].Number("tick"), at, grenades[0].Number("tick") + fuse - 1);
+        Assert.Equal(fuse, detonated.Number("tick") - grenades[1].Number("tick"));
+        // Every projectile fired before the reset is gone without a wall, player or range removal.
+        var projectiles = Patterns.Read(s.Server, "projectile-created");
+        var before = projectiles.Where(p => p.Number("tick") < at).ToArray();
+        Assert.NotEmpty(before);
+        var removed = Patterns.Read(s.Server, "projectile-removed");
+        Assert.All(before, p => Assert.DoesNotContain(removed, r => r.Number("entity") == p.Number("entity")));
+        Assert.Equal(projectiles.Length - before.Length, removed.Length);
+    });
+
+    [Fact, Trait("Scenario", "ResetMovesPlayerBack")]
+    public Task Reset_puts_a_player_who_walked_away_back_on_the_team_spawn() => Run(async s =>
+    {
+        // One client walks east for the whole 150-tick Warmup (the wall is reached after about 61 ticks).
+        await s.Boot("--match-ticks", "150,3000,30");
+        var client = await s.Client("client", "east", 400);
+        await s.Finish(client);
+        await s.StopServer();
+
+        var spawns = ArenaSpawns(s);
+        var reset = One(s.Server, "match-reset");
+        Assert.Equal(("Warmup", "Playing"), (reset.Text("from"), reset.Text("to")));
+        var before = Patterns.Read(s.Server, "position").Last(p => p.Number("tick") < reset.Number("tick"));
+        // P26 D3 wall position: the 32-wide body's right edge is within 1 unit of the wall at x=258.
+        Assert.InRange(before.Position.X + 16, 257, 258);
+        var player = One(s.Server, "match-reset-player");
+        Assert.Equal((reset.Number("tick"), 0L, 100L), (player.Number("tick"), player.Number("spawn"), player.Number("health")));
+        Assert.Equal(spawns[0], player.Position);
+        // The player keeps walking after the reset, so it leaves the spawn again rather than staying frozen.
+        Assert.InRange(One(s.Server, "departed").Position.X + 16, 257, 258);
+    });
+
+    [Fact, Trait("Scenario", "BoardHeld")]
+    public Task Holding_the_scoreboard_action_shows_the_board_and_releasing_hides_it() => Run(async s =>
+    {
+        // The script presses the client's "scoreboard" input action at input 120 and releases it at input 240.
+        // The phases are too long to end (3000 ticks), so no end-of-match screen can appear.
+        await s.Boot();
+        var client = await s.Client("client", "hold-board", 360);
+        await s.Finish(client);
+        await s.StopServer();
+        Counters(s, client);
+
+        var join = One(s.Server, "match-join");
+        var boards = Patterns.Read(client, "board");
+        Assert.Equal(["key", "hidden"], boards.Select(b => b.Text("view")).ToArray());
+        Assert.Equal($"{join.Text("team")}:{join.Number("entity")}:0:0", boards[0].Text("rows"));
+        Assert.Empty(Patterns.Read(client, "result"));
+        // Holding the action sends nothing to the server: no shot, no grenade, no movement.
+        Assert.Empty(Patterns.Read(s.Server, "shot"));
+        Assert.Empty(Patterns.Read(s.Server, "grenade-created"));
+        Assert.Equal(JoinedAt(s, join.Number("entity")), One(s.Server, "departed").Position);
+    });
+
+    [Theory, Trait("Scenario", "LocalClick")]
+    [InlineData("local-click")] // button held for 6 ticks
+    [InlineData("local-tap")]   // press and release inside one tick, like a trackpad tap
+    public Task Left_button_events_read_through_the_manual_input_path_fire_one_shot_each(string script) => Run(async s =>
+    {
+        // The script feeds real left-mouse-button events to the engine at inputs 120, 180, ... 660 (ten clicks)
+        // and builds each input with the same code as manual play. No timing assumption: one client only.
+        await s.Boot();
+        var client = await s.Client("client", script, 700);
+        await s.Finish(client);
+        await s.StopServer();
+        Counters(s, client);
+        var shots = Patterns.Read(s.Server, "shot");
+        // P28 R4 loss floor: a click whose input is lost is not fired, so allow two of ten to be missing.
+        Assert.InRange(shots.Length, 8, 10);
+        Assert.All(shots, shot => Assert.Equal("DevHitscan", shot.Text("weapon")));
+        // One shot per click: consecutive shots are a whole number of 60-tick click periods apart.
+        foreach (var pair in shots.Zip(shots.Skip(1)))
+            Assert.InRange((pair.Second.Number("tick") - pair.First.Number("tick") + 5) % 60, 0, 10);
+        Assert.Empty(Patterns.Read(s.Server, "grenade-created"));
+    });
 }

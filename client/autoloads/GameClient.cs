@@ -60,7 +60,23 @@ public partial class GameClient : Node
     private int _postDefeatPresses;
     private bool _loggedRespawnSnapshot;
     private (int Projectiles, int Grenades) _lastCounts = (-1, -1);
-    private static readonly string[] Scripts = ["east", "illegal", "idle", "fire-hitscan", "post-respawn", "blocked-hitscan", "fire-projectile", "blocked-projectile", "throw-grenade", "grenade-away", "grenade-owner", "mash-fire", "disconnect-fight", "disconnect-owned-grenade"];
+    private static readonly string[] Scripts = ["east", "illegal", "idle", "fire-hitscan", "post-respawn", "blocked-hitscan", "fire-projectile", "blocked-projectile", "throw-grenade", "grenade-away", "grenade-owner", "mash-fire", "disconnect-fight", "disconnect-owned-grenade",
+        // P39 smoke-only scripts.
+        "ff-fire", "fire-until", "reset-clear", "hold-board", "local-click", "local-tap"];
+    private static readonly string[] Targets = ["other", "teammate", "enemy", "last-enemy"];
+    // P39 smoke-only options: who a combat script aims at, how many own kills stop "fire-until", and how many
+    // players the snapshot must show before a combat script starts.
+    private string _smokeTarget = "other";
+    private uint _smokeKills;
+    private int _smokeWaitPlayers;
+    private uint _ownKills;
+    private readonly HashSet<uint> _smokeGrenadeIds = new();
+    private bool _smokeProjectileSeen;
+    // A fire or grenade press seen by _Input since the last input was sent. The button state is sampled once per
+    // physics tick, so without this a press and release inside one tick (a quick click or trackpad tap) would
+    // never reach the server.
+    private bool _firePressLatched;
+    private bool _grenadePressLatched;
 
 
     public override void _Ready()
@@ -95,6 +111,33 @@ public partial class GameClient : Node
                         return;
                     }
                     _smokeScript = arguments[i];
+                    break;
+                case "--net-target":
+                    if (++i >= arguments.Length || !Targets.Contains(arguments[i]))
+                    {
+                        GD.PrintErr("[GameClient] error: --net-target requires other, teammate, enemy, or last-enemy.");
+                        GetTree().Quit(1);
+                        return;
+                    }
+                    _smokeTarget = arguments[i];
+                    break;
+                case "--net-kills":
+                    if (++i >= arguments.Length ||
+                        !uint.TryParse(arguments[i], NumberStyles.None, CultureInfo.InvariantCulture, out _smokeKills) || _smokeKills == 0)
+                    {
+                        GD.PrintErr("[GameClient] error: --net-kills requires a positive uint kill count.");
+                        GetTree().Quit(1);
+                        return;
+                    }
+                    break;
+                case "--net-wait-players":
+                    if (++i >= arguments.Length ||
+                        !int.TryParse(arguments[i], NumberStyles.None, CultureInfo.InvariantCulture, out _smokeWaitPlayers) || _smokeWaitPlayers == 0)
+                    {
+                        GD.PrintErr("[GameClient] error: --net-wait-players requires a positive integer player count.");
+                        GetTree().Quit(1);
+                        return;
+                    }
                     break;
                 case "--net-smoke":
                     if (++i >= arguments.Length ||
@@ -134,8 +177,10 @@ public partial class GameClient : Node
                 BeginDisconnect(false);
             }
         }
+        if (@event.IsActionPressed(PrimaryFire)) _firePressLatched = true;
+        if (@event.IsActionPressed(GrenadeThrow)) _grenadePressLatched = true;
         // Tab must not move the GUI focus while the board exists (connected play only).
-        else if (IsInstanceValid(_matchBoard) && @event.IsAction(ScoreboardAction))
+        if (IsInstanceValid(_matchBoard) && @event.IsAction(ScoreboardAction))
         {
             GetViewport().SetInputAsHandled();
         }
@@ -162,6 +207,10 @@ public partial class GameClient : Node
         _smokeGrenadeObservedTick = null;
         _sawDefeat = _loggedRespawnSnapshot = false;
         _postDefeatPresses = 0;
+        _ownKills = 0;
+        _firePressLatched = _grenadePressLatched = false;
+        _smokeGrenadeIds.Clear();
+        _smokeProjectileSeen = false;
         _lastCounts = (-1, -1);
         _clientTick = 0;
         _sent = 0;
@@ -255,8 +304,9 @@ public partial class GameClient : Node
         if (move.LengthSquared() > 1f) move = move.Normalized();
         FindPlayer();
         InputButtons buttons = _combat?.ActiveWeaponId == WeaponId.DevProjectile ? InputButtons.SelectSlot2 : InputButtons.SelectSlot1;
-        if (Input.IsActionPressed(PrimaryFire)) buttons |= InputButtons.PrimaryFire;
-        if (Input.IsActionPressed(GrenadeThrow)) buttons |= InputButtons.Grenade;
+        if (Input.IsActionPressed(PrimaryFire) || _firePressLatched) buttons |= InputButtons.PrimaryFire;
+        if (Input.IsActionPressed(GrenadeThrow) || _grenadePressLatched) buttons |= InputButtons.Grenade;
+        _firePressLatched = _grenadePressLatched = false;
 
         FindPlayer();
         if (_player is null && !_loggedMissingPlayer)
@@ -286,9 +336,63 @@ public partial class GameClient : Node
                 } : new(-0.1f, 0f);
             return new(tick, move, 0f, InputButtons.SelectSlot1);
         }
+        if (_smokeScript == "hold-board")
+        {
+            // Smoke-only: hold the scoreboard action for two seconds. The action state is read in _Process only
+            // to show the panel; the input sent to the server stays idle.
+            if (tick == 120) Input.ActionPress(ScoreboardAction);
+            if (tick == 240) Input.ActionRelease(ScoreboardAction);
+            return new(tick, NumericsVector2.Zero, 0f, InputButtons.SelectSlot1);
+        }
+        if (_smokeScript is "local-click" or "local-tap")
+        {
+            // Smoke-only: feed real left-button events to the engine and read them through the same path as
+            // manual play. One click every 60 ticks, starting at input 120. "local-click" holds the button for
+            // 6 ticks; "local-tap" presses and releases inside one tick, like a trackpad tap.
+            bool tap = _smokeScript == "local-tap";
+            if (tick >= 120 && tick % 60 == 0)
+                Input.ParseInputEvent(new InputEventMouseButton { ButtonIndex = MouseButton.Left, Pressed = true });
+            if (tick >= 120 && tick % 60 == (tap ? 0u : 6u))
+                Input.ParseInputEvent(new InputEventMouseButton { ButtonIndex = MouseButton.Left, Pressed = false });
+            Input.FlushBufferedEvents();
+            return ReadLocalInput(tick);
+        }
+        if (_smokeScript == "reset-clear") return ResetClearInput(tick);
         if (_smokeScript != "default") return CombatScriptedInput(tick);
         return DefaultScriptedInput(tick);
     }
+
+    // Smoke-only (P39). Shortly before the warmup ends it throws a grenade (45 ticks or fewer left) and fires the
+    // projectile gun east (12 ticks or fewer left), so both are still alive at the Warmup>Playing reset. Once
+    // Playing starts it throws a second grenade at once. The button is pulsed every fourth tick, so a lost input
+    // only delays the press; pulsing stops when a snapshot shows the result.
+    private InputCommand ResetClearInput(uint tick)
+    {
+        InputButtons buttons = InputButtons.SelectSlot2;
+        if (_matchState is MatchStateMessage match && tick % 4 == 0)
+        {
+            int left = TickMath.Delta(match.PhaseEndTick, NewestServerTick());
+            if (match.Phase == MatchPhase.Warmup)
+            {
+                if (left <= 45 && _smokeGrenadeIds.Count == 0) buttons |= InputButtons.Grenade;
+                if (left <= 12 && !_smokeProjectileSeen) buttons |= InputButtons.PrimaryFire;
+            }
+            else if (match.Phase == MatchPhase.Playing && _smokeGrenadeIds.Count < 2)
+                buttons |= InputButtons.Grenade;
+            if ((buttons & (InputButtons.Grenade | InputButtons.PrimaryFire)) != 0)
+                GD.Print($"[GameClient] request script={_smokeScript}; client-tick={tick}; phase={match.Phase}; buttons={buttons}; aim=0");
+        }
+        return new(tick, NumericsVector2.Zero, 0f, buttons);
+    }
+
+    // Smoke-only (P39): the player a combat script aims at. Snapshot players are in ascending entity id order.
+    private static PlayerState? SmokeTarget(PlayerState[] players, PlayerState self, string kind) => kind switch
+    {
+        "teammate" => players.Where(p => p.EntityId != self.EntityId && p.Faction == self.Faction).Cast<PlayerState?>().FirstOrDefault(),
+        "enemy" => players.Where(p => p.Faction != self.Faction).Cast<PlayerState?>().FirstOrDefault(),
+        "last-enemy" => players.Where(p => p.Faction != self.Faction).Cast<PlayerState?>().LastOrDefault(),
+        _ => players.Where(p => p.EntityId != self.EntityId).Cast<PlayerState?>().FirstOrDefault(),
+    };
 
     private static InputCommand DefaultScriptedInput(uint tick) => new(tick,
         (tick % 4u) switch
@@ -303,11 +407,19 @@ public partial class GameClient : Node
 
     private InputCommand CombatScriptedInput(uint tick)
     {
-        bool projectile = _smokeScript is "fire-projectile" or "blocked-projectile";
+        // "ff-fire" (P39): presses every 45 ticks. Presses 0 and 1 fire the instant-shot gun at a teammate,
+        // presses 2 and 3 the projectile gun at the same teammate, and later presses the instant-shot gun at an
+        // enemy until a defeat is seen. _combatScriptTick is 90 + 45 * press at each press.
+        bool friendlyFire = _smokeScript == "ff-fire";
+        bool projectile = _smokeScript is "fire-projectile" or "blocked-projectile" ||
+            (friendlyFire && _combatScriptTick is >= 180 and < 270);
         InputButtons buttons = projectile ? InputButtons.SelectSlot2 : InputButtons.SelectSlot1;
-        var own = _lastSnapshot?.Players.FirstOrDefault(p => p.EntityId == _entityId);
-        var other = _lastSnapshot?.Players.FirstOrDefault(p => p.EntityId != _entityId);
-        if (own is not PlayerState self || self.EntityId == 0 || other is not PlayerState target || target.EntityId == 0)
+        string targetKind = friendlyFire ? (_combatScriptTick < 270 ? "teammate" : "enemy") : _smokeTarget;
+        PlayerState[] seen = _lastSnapshot?.Players ?? [];
+        var own = seen.Where(p => p.EntityId == _entityId).Cast<PlayerState?>().FirstOrDefault();
+        if (own is not PlayerState self || seen.Length < _smokeWaitPlayers ||
+            (friendlyFire && (SmokeTarget(seen, self, "teammate") is null || SmokeTarget(seen, self, "enemy") is null)) ||
+            SmokeTarget(seen, self, targetKind) is not PlayerState target)
             return new(tick, NumericsVector2.Zero, 0, buttons);
         var difference = target.Position - self.Position;
         float aim = MathF.Atan2(difference.Y, difference.X);
@@ -326,11 +438,14 @@ public partial class GameClient : Node
             // observed authoritative creation; never rerun the scenario.
             "throw-grenade" or "grenade-away" or "grenade-owner" => !_smokeGrenadeObservedTick.HasValue && fireTick % 20 == 0,
             "disconnect-fight" or "disconnect-owned-grenade" => fireTick == 0,
+            "ff-fire" => fireTick % 45 == 0,
+            // Keeps killing through respawns until this client has seen its own kill count reach --net-kills.
+            "fire-until" => _ownKills < _smokeKills && fireTick % 20 == 0,
             _ => fireTick % (projectile ? 45u : 20u) == 0,
         };
         if (_smokeScript is "grenade-away" or "disconnect-fight") aim += MathF.PI;
         if (_smokeScript == "grenade-owner") aim = -MathF.PI / 2;
-        if (_sawDefeat && _smokeScript != "mash-fire")
+        if (_sawDefeat && _smokeScript is not ("mash-fire" or "fire-until"))
         {
             if (_smokeScript != "post-respawn" || _postDefeatPresses >= 1) press = false;
             else if (press) _postDefeatPresses++;
@@ -404,6 +519,7 @@ public partial class GameClient : Node
                 LogEvent("defeat", defeat.ServerTick, defeat.SourceEntityId, defeat.TargetEntityId, null);
                 Flash(defeat.TargetEntityId, true);
                 if (defeat.TargetEntityId != _entityId) _sawDefeat = true;
+                if (defeat.SourceEntityId == _entityId) _ownKills++;
             }
             else if (MessageCodec.TryDecodeMatchState(packet, out MatchStateMessage matchState))
             {
@@ -437,6 +553,11 @@ public partial class GameClient : Node
             _smokeScript is "throw-grenade" or "grenade-away" or "grenade-owner" &&
             !_smokeGrenadeObservedTick.HasValue && snapshot.Grenades.Length > 0)
             _smokeGrenadeObservedTick = _clientTick;
+        if (_smokeTicks.HasValue && _smokeScript == "reset-clear")
+        {
+            foreach (GrenadeState grenade in snapshot.Grenades) _smokeGrenadeIds.Add(grenade.EntityId);
+            _smokeProjectileSeen |= snapshot.Projectiles.Length > 0;
+        }
         _lastSnapshot = snapshot;
         _lastSnapshotTick = snapshot.ServerTick;
         _snapshotsApplied++;
